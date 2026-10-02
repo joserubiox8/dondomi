@@ -19,6 +19,11 @@ import {
   UtensilsCrossed,
   Phone,
   Check,
+  Copy,
+  Lock,
+  Unlock,
+  KeyRound,
+  AlertCircle,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { VALLEDUPAR_NEIGHBORHOODS } from '@/data/mockData';
@@ -38,6 +43,41 @@ export default function AdminPage() {
 
   const [activeTab, setActiveTab] = useState<'RESTAURANTES' | 'PEDIDOS' | 'TARIFAS' | 'ARQUITECTURA'>('RESTAURANTES');
 
+  // Master PIN de Administrador (Valor predeterminado: 2026)
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
+  const [masterPinInput, setMasterPinInput] = useState<string>('');
+  const [masterPinError, setMasterPinError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const auth = sessionStorage.getItem('admin_master_auth');
+      if (auth === 'true') {
+        setIsAdminAuthenticated(true);
+      }
+    }
+  }, []);
+
+  const handleMasterPinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (masterPinInput.trim() === '2026') {
+      setIsAdminAuthenticated(true);
+      setMasterPinError(null);
+      setMasterPinInput('');
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('admin_master_auth', 'true');
+      }
+    } else {
+      setMasterPinError('PIN Maestro incorrecto. (PIN predeterminado: 2026)');
+    }
+  };
+
+  const handleAdminLock = () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('admin_master_auth');
+    }
+    setIsAdminAuthenticated(false);
+  };
+
   // Modal para afiliar nuevo restaurante
   const [isAddRestModalOpen, setIsAddRestModalOpen] = useState(false);
   const [newRestName, setNewRestName] = useState('');
@@ -45,8 +85,9 @@ export default function AdminPage() {
   const [newRestAddress, setNewRestAddress] = useState('');
   const [newRestPhone, setNewRestPhone] = useState('');
   const [newRestHours, setNewRestHours] = useState('11:00 AM - 10:00 PM');
-  const [newRestBaseFee, setNewRestBaseFee] = useState(5000);
+  const [newRestBaseFee, setNewRestBaseFee] = useState(7000);
   const [newRestCommission, setNewRestCommission] = useState(15);
+  const [newRestPin, setNewRestPin] = useState('1234');
   const [newRestTags, setNewRestTags] = useState('Comida Típica, Asados');
   const [newRestDescription, setNewRestDescription] = useState('');
 
@@ -92,6 +133,7 @@ export default function AdminPage() {
       deliveryFeeBase: Number(newRestBaseFee),
       minOrderAmount: 15000,
       commissionRate: Number(newRestCommission),
+      pin: newRestPin.trim() || '1234',
       acceptsCash: true,
       acceptsNequi: true,
       acceptsDaviplata: true,
@@ -106,7 +148,18 @@ export default function AdminPage() {
     setNewRestAddress('');
     setNewRestPhone('');
     setNewRestDescription('');
+    setNewRestPin('1234');
     alert(`¡Restaurante "${created.name}" registrado y publicado con éxito!`);
+  };
+
+  const handleDuplicateProduct = (prod: Product) => {
+    if (!menuModalRest) return;
+    const clonedProd: Product = {
+      ...prod,
+      id: `prod-${Date.now()}`,
+      name: `${prod.name} (Copia)`,
+    };
+    addProduct(menuModalRest.id, clonedProd);
   };
 
   const handleAddProduct = (e: React.FormEvent) => {
@@ -181,7 +234,7 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <Link
               href="/"
               className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5"
@@ -189,11 +242,80 @@ export default function AdminPage() {
               <span>Ver App Cliente</span>
               <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
+
+            {isAdminAuthenticated && (
+              <button
+                onClick={handleAdminLock}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5"
+                title="Bloquear panel de administración"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Bloquear</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+      {!isAdminAuthenticated ? (
+        <main className="max-w-md mx-auto px-4 py-16">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl text-center space-y-6">
+            <div className="w-16 h-16 rounded-2xl bg-slate-900 text-orange-500 mx-auto flex items-center justify-center shadow-inner">
+              <Shield className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600 bg-orange-50 px-2.5 py-0.5 rounded-full">
+                Acceso Maestro Restringido
+              </span>
+              <h2 className="text-xl font-black text-slate-900 mt-2">
+                DonDomi Control Central
+              </h2>
+              <p className="text-xs text-slate-500">
+                Ingresa el PIN Maestro para gestionar restaurantes, comisiones y configuración en Valledupar.
+              </p>
+            </div>
+
+            <form onSubmit={handleMasterPinSubmit} className="space-y-4">
+              <div>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  autoFocus
+                  placeholder="PIN Maestro (2026)"
+                  value={masterPinInput}
+                  onChange={(e) => {
+                    setMasterPinInput(e.target.value);
+                    setMasterPinError(null);
+                  }}
+                  className="w-full text-center text-2xl tracking-[0.5em] font-mono font-black py-3 px-4 bg-slate-50 border-2 border-slate-200 focus:border-orange-500 focus:bg-white rounded-2xl outline-none transition"
+                />
+                {masterPinError && (
+                  <p className="text-xs text-red-600 font-bold mt-2 flex items-center justify-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>{masterPinError}</span>
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-slate-900/25 transition text-sm flex items-center justify-center gap-2"
+              >
+                <Unlock className="w-4 h-4 text-orange-400" />
+                <span>Desbloquear Administración</span>
+              </button>
+            </form>
+
+            <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-400">
+              💡 PIN Maestro predeterminado: <strong className="text-slate-600 font-mono">2026</strong>
+            </div>
+          </div>
+        </main>
+      ) : (
+        <>
+          <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
         {/* Banner onboarding target */}
         <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-orange-950 rounded-3xl p-5 text-white shadow-lg border border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -374,7 +496,12 @@ export default function AdminPage() {
                             />
                             <div>
                               <span className="font-extrabold text-slate-900 block">{r.name}</span>
-                              <span className="text-[11px] text-slate-400">{r.tags[0]}</span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[11px] text-slate-400">{r.tags[0]}</span>
+                                <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded border border-slate-200">
+                                  PIN: {r.pin || '1234'}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -534,54 +661,59 @@ export default function AdminPage() {
         {activeTab === 'TARIFAS' && (
           <div className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-6 shadow-2xs space-y-4">
             <div>
-              <h3 className="text-base font-extrabold text-slate-900">
-                Matriz de Tarifas por Zonas en Valledupar
-              </h3>
-              <p className="text-xs text-slate-500">
-                El precio del domicilio se calcula dinámicamente según la distancia entre el barrio del restaurante y la ubicación del cliente.
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Tarifa Plana de Domicilio: $7.000 COP en Todo Valledupar
+                </h3>
+                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                  Fase MVP Activa
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Estrategia de lanzamiento: Para evitar inconsistencias o cobros desfavorables por distancias calculadas entre barrios (ej: de La Nevada a Mayales), el cobro de domicilio es de $7.000 COP estándar para toda la ciudad.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
               <div className="p-4 rounded-2xl bg-orange-50/60 border border-orange-200 space-y-2">
                 <span className="text-xs font-black text-orange-700 block uppercase">
-                  Zona 1: Centro & Novalito
+                  Transparencia Total
                 </span>
                 <p className="text-xs text-slate-600">
-                  Tarifa base: <strong>$4.500 - $5.000 COP</strong>
+                  Tarifa única para cliente: <strong>$7.000 COP</strong>
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Tiempo estimado: 20-30 min. Incluye Centro Histórico, Novalito, Los Cortijos, Alfonso López.
+                  El cliente sabe exactamente cuánto pagará antes de pedir. Sin sorpresas ni recargos ocultos.
                 </p>
               </div>
 
               <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200 space-y-2">
                 <span className="text-xs font-black text-amber-800 block uppercase">
-                  Zona 2: Intermedia
+                  Autogestión del Aliado
                 </span>
                 <p className="text-xs text-slate-600">
-                  Tarifa base: <strong>$6.000 - $6.500 COP</strong>
+                  Ingreso directo al restaurante / domiciliario
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Tiempo estimado: 30-40 min. Conexión hacia San Joaquín, Cinco de Noviembre, Los Músicos.
+                  En la fase 1, el restaurante despacha con su propio personal y liquida el domicilio directamente.
                 </p>
               </div>
 
               <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200 space-y-2">
                 <span className="text-xs font-black text-blue-800 block uppercase">
-                  Zona 3: Periférica
+                  Cobertura Total Valledupar
                 </span>
                 <p className="text-xs text-slate-600">
-                  Tarifa base: <strong>$7.500 - $8.500 COP</strong>
+                  <strong>40+ Barrios</strong> registrados
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Tiempo estimado: 40-50 min. La Nevada, Don Alberto, Villa Ligia.
+                  Desde Novalito y Centro hasta La Nevada, Ciudadela 450 Años y Los Cortijos.
                 </p>
               </div>
             </div>
 
             <div className="pt-4 border-t border-slate-100">
-              <h4 className="text-xs font-bold text-slate-800 mb-2">Barrios registrados para el cálculo dinámico:</h4>
+              <h4 className="text-xs font-bold text-slate-800 mb-2">Barrios habilitados en Valledupar:</h4>
               <div className="flex flex-wrap gap-2">
                 {VALLEDUPAR_NEIGHBORHOODS.map((b) => (
                   <span
@@ -722,14 +854,14 @@ export default function AdminPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="font-bold text-slate-700 block mb-1">Horario</label>
                   <input
                     type="text"
                     value={newRestHours}
                     onChange={(e) => setNewRestHours(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs"
                   />
                 </div>
 
@@ -739,7 +871,7 @@ export default function AdminPage() {
                     type="number"
                     value={newRestBaseFee}
                     onChange={(e) => setNewRestBaseFee(Number(e.target.value))}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs"
                   />
                 </div>
 
@@ -749,7 +881,19 @@ export default function AdminPage() {
                     type="number"
                     value={newRestCommission}
                     onChange={(e) => setNewRestCommission(Number(e.target.value))}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">PIN Cocina *</label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={newRestPin}
+                    onChange={(e) => setNewRestPin(e.target.value)}
+                    placeholder="1234"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs font-mono font-bold"
                   />
                 </div>
               </div>
@@ -914,17 +1058,26 @@ export default function AdminPage() {
                           <span className="font-black text-orange-600 block">{formatCOP(prod.price)}</span>
                         </div>
 
-                        <button
-                          onClick={() => {
-                            if (confirm(`¿Eliminar "${prod.name}" del menú?`)) {
-                              deleteProduct(menuModalRest.id, prod.id);
-                            }
-                          }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition"
-                          title="Eliminar plato"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDuplicateProduct(prod)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-orange-600 hover:bg-orange-50 transition"
+                            title="Duplicar plato rápidamente"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm(`¿Eliminar "${prod.name}" del menú?`)) {
+                                deleteProduct(menuModalRest.id, prod.id);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition"
+                            title="Eliminar plato"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))
                   )}
@@ -933,6 +1086,8 @@ export default function AdminPage() {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

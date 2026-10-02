@@ -85,13 +85,14 @@ export interface Restaurant {
   openingHours: string; // Ej: "11:00 AM - 10:30 PM"
   estimatedTimeMin: number; // Ej: 25
   estimatedTimeMax: number; // Ej: 40
-  deliveryFeeBase: number; // Base en COP, ej: 5000
+  deliveryFeeBase: number; // Base en COP, ej: 7000
   minOrderAmount: number; // Ej: 15000
   commissionRate: number; // Porcentaje, ej: 15 (15%)
   acceptsCash: boolean;
   acceptsNequi: boolean;
   acceptsDaviplata: boolean;
   featured?: boolean;
+  pin?: string; // PIN de 4 dígitos para acceso exclusivo de la cocina en /merchant
 }
 
 export type OrderStatus =

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   X,
   Plus,
@@ -208,14 +209,27 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               </div>
             </div>
 
+            {/* Botón Seguimiento en vivo */}
+            <Link
+              href={`/order/${placedOrder.orderNumber}`}
+              onClick={() => {
+                clearCart();
+                setPlacedOrder(null);
+                onClose();
+              }}
+              className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-orange-600/25 flex items-center justify-center gap-2 text-sm transition"
+            >
+              <span>🛵 Rastrear mi Pedido en Tiempo Real</span>
+            </Link>
+
             {/* Botón WhatsApp */}
             <a
               href={generateWhatsAppUrl(placedOrder)}
               target="_blank"
               rel="noreferrer"
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 text-sm transition"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-4 rounded-2xl shadow-md flex items-center justify-center gap-2 text-xs transition"
             >
-              <MessageCircle className="w-5 h-5" />
+              <MessageCircle className="w-4 h-4" />
               <span>Enviar Copia por WhatsApp al Restaurante</span>
             </a>
 
@@ -225,9 +239,9 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 setPlacedOrder(null);
                 onClose();
               }}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-2xl text-xs transition"
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-2xl text-xs transition"
             >
-              Listo, volver a la tienda
+              Cerrar y volver
             </button>
           </div>
         ) : cart.length === 0 ? (

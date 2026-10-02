@@ -17,6 +17,7 @@ export const metadata: Metadata = {
   title: 'DonDomi | Comida y Domicilios en Valledupar',
   description:
     'Pide la mejor comida de tus restaurantes favoritos en Valledupar rápido, fresco y a la puerta de tu casa.',
+  manifest: '/manifest.json',
 };
 
 export const viewport: Viewport = {

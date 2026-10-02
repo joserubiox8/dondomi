@@ -61,6 +61,7 @@ interface AppContextType {
   productsByRestaurant: Record<string, Product[]>;
   addProduct: (restaurantId: string, newProduct: Product) => Promise<void>;
   deleteProduct: (restaurantId: string, productId: string) => Promise<void>;
+  toggleProductAvailability: (restaurantId: string, productId: string) => Promise<void>;
 
   // Pedidos
   orders: Order[];
@@ -279,6 +280,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const toggleProductAvailability = async (restaurantId: string, productId: string) => {
+    let nextAvailable = true;
+    setProductsByRestaurant((prev) => {
+      const currentList = prev[restaurantId] || [];
+      return {
+        ...prev,
+        [restaurantId]: currentList.map((p) => {
+          if (p.id === productId) {
+            nextAvailable = !p.isAvailable;
+            return { ...p, isAvailable: nextAvailable };
+          }
+          return p;
+        }),
+      };
+    });
+
+    try {
+      await supabase.from('products').update({ is_available: nextAvailable }).eq('id', productId);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Manejo de pedidos sincronizado con Supabase
   const addOrder = async (newOrder: Order) => {
     setOrders((prev) => [newOrder, ...prev]);
@@ -432,6 +456,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         productsByRestaurant,
         addProduct,
         deleteProduct,
+        toggleProductAvailability,
         orders,
         addOrder,
         updateOrderStatus,
