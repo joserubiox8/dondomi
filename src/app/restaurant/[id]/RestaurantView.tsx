@@ -35,7 +35,9 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
   const restaurant = restaurants.find((r) => r.id === restaurantId);
 
   // Obtener productos de este restaurante (100% textuales con adiciones)
-  const products = productsByRestaurant[restaurantId] || [];
+  const products = (productsByRestaurant[restaurantId] && productsByRestaurant[restaurantId].length > 0)
+    ? productsByRestaurant[restaurantId]
+    : productsByRestaurant['rest-1'] || [];
 
   // Calcular categorías únicas disponibles en el menú
   const menuCategories = useMemo(() => {
