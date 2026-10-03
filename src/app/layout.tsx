@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { AppProvider } from '@/context/AppContext';
-import LocationModal from '@/components/common/LocationModal';
 import CartFloatBar from '@/components/restaurant/CartFloatBar';
 import BottomNav from '@/components/common/BottomNav';
 
@@ -38,7 +37,6 @@ export default function RootLayout({
       <body className={`${fontSans.className} h-full antialiased text-slate-800 bg-slate-50 selection:bg-orange-500 selection:text-white pb-20 sm:pb-8 font-sans`}>
         <AppProvider>
           {children}
-          <LocationModal />
           <CartFloatBar />
           <BottomNav />
         </AppProvider>

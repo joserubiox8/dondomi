@@ -17,25 +17,30 @@ export default function CartFloatBar() {
       <div className="fixed bottom-20 sm:bottom-6 left-4 right-4 z-40 max-w-lg mx-auto animate-in slide-in-from-bottom duration-300">
         <button
           onClick={() => setIsDrawerOpen(true)}
-          className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-2xl p-3.5 shadow-xl shadow-slate-900/30 flex items-center justify-between border border-slate-700/50 active:scale-[0.99] transition group"
+          className="w-full bg-slate-950 hover:bg-black text-white rounded-3xl p-3.5 sm:p-4 shadow-2xl shadow-black/60 flex items-center justify-between border-2 border-orange-500 active:scale-[0.98] transition cursor-pointer group"
         >
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-orange-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
-              {cartCount}
+          {/* Lado izquierdo: Contador y Restaurante */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-orange-600 text-white flex items-center justify-center font-black text-sm shadow-md flex-shrink-0">
+              <ShoppingBag className="w-4 h-4 mr-0.5" />
+              <span>{cartCount}</span>
             </div>
-            <div className="text-left">
-              <span className="text-[11px] text-slate-400 block uppercase font-bold tracking-wider leading-none">
-                Ver Canasta · {cartRestaurantName}
+            <div className="text-left min-w-0">
+              <span className="text-[10px] font-black uppercase tracking-wider text-orange-400 block leading-tight">
+                Ver Canasta
               </span>
-              <span className="text-sm font-extrabold text-white">
-                {formatCOP(cartSubtotal)}
-              </span>
+              <p className="text-xs sm:text-sm font-bold text-white truncate max-w-[150px] sm:max-w-[210px]">
+                {cartRestaurantName}
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1 text-xs font-bold text-orange-400 group-hover:text-orange-300">
-            <span>Ver pedido</span>
-            <ChevronRight className="w-4 h-4" />
+          {/* Lado derecho: Valor total con alto contraste */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="bg-white text-slate-950 font-black text-xs sm:text-sm px-3.5 py-1.5 rounded-2xl shadow-md flex items-center gap-1.5 group-hover:bg-orange-50 transition">
+              <span>{formatCOP(cartSubtotal)}</span>
+              <ChevronRight className="w-4 h-4 text-orange-600 stroke-[3]" />
+            </div>
           </div>
         </button>
       </div>

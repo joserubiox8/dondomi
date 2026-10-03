@@ -77,7 +77,7 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
+    <div className="min-h-screen bg-slate-50 pb-52 sm:pb-36">
       {/* Top Floating Back Bar */}
       <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-100 px-4 py-3 flex items-center justify-between">
         <Link
@@ -90,9 +90,10 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
           <h1 className="text-sm font-black text-slate-900 truncate">{restaurant.name}</h1>
           <p className="text-[10px] text-slate-500 truncate">Valledupar, Cesar</p>
         </div>
-        <div className="w-10 flex justify-end">
-          <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-full border border-orange-200">
-            ★ {restaurant.rating.toFixed(1)}
+        <div className="flex justify-end">
+          <span className="text-[11px] font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 flex items-center gap-1">
+            <MapPin className="w-3 h-3 text-orange-600" />
+            <span className="truncate max-w-[110px]">{restaurant.neighborhood}</span>
           </span>
         </div>
       </div>
@@ -167,11 +168,11 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
 
               <div className="border-x border-slate-200">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Domicilio a {currentNeighborhood}
+                  Domicilio Fijo
                 </span>
                 <span className="text-xs sm:text-sm font-extrabold text-orange-600 flex items-center justify-center gap-1 mt-0.5">
                   <Bike className="w-3.5 h-3.5 text-orange-600" />
-                  {formatCOP(deliveryInfo.fee)}
+                  $ 7.000
                 </span>
               </div>
 
@@ -226,12 +227,12 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
             </span>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3.5">
             {filteredProducts.map((product) => (
               <div
                 key={product.id}
                 onClick={() => setActiveModalProduct(product)}
-                className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-2xs hover:border-orange-300 hover:shadow-xs transition cursor-pointer flex flex-col justify-between gap-3 group active:scale-[0.99]"
+                className="bg-white rounded-3xl p-5 border-2 border-slate-300 shadow-xs hover:border-orange-500 hover:shadow-md transition cursor-pointer flex flex-col justify-between gap-3.5 group active:scale-[0.99]"
               >
                 {/* Product Text Details */}
                 <div className="space-y-1.5">
@@ -255,7 +256,7 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
                       {product.options.map((opt) => (
                         <span
                           key={opt.id}
-                          className="text-[10px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md"
+                          className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"
                         >
                           + {opt.name}
                         </span>
@@ -265,9 +266,9 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
                 </div>
 
                 {/* Bottom Row: Price and Add Button */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-base font-black text-slate-900">
+                    <span className="text-base font-black text-slate-900 group-hover:text-orange-600 transition">
                       {formatCOP(product.price)}
                     </span>
                     {product.originalPrice && (
@@ -283,7 +284,7 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
                       e.stopPropagation();
                       setActiveModalProduct(product);
                     }}
-                    className="bg-orange-50 hover:bg-orange-600 text-orange-600 hover:text-white border border-orange-200 hover:border-orange-600 px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs group-hover:bg-orange-600 group-hover:text-white"
+                    className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition active:scale-95"
                   >
                     <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                     <span>Agregar</span>

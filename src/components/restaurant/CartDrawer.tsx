@@ -39,9 +39,10 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     addOrder,
   } = useApp();
 
-  const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'NEQUI' | 'DAVIPLATA'>('NEQUI');
+  const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD'>('NEQUI');
   const [customerName, setCustomerName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
+  const [deliveryNeighborhood, setDeliveryNeighborhood] = useState<string>('');
   const [deliveryStreet, setDeliveryStreet] = useState<string>('');
   const [deliveryReference, setDeliveryReference] = useState<string>('');
   const [orderNotes, setOrderNotes] = useState<string>('');
@@ -50,21 +51,15 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   if (!isOpen) return null;
 
   const currentRestaurant = restaurants.find((r) => r.id === cartRestaurantId);
-  const deliveryInfo = calculateDeliveryEstimate(
-    currentRestaurant?.neighborhood || 'Centro Histórico',
-    currentNeighborhood,
-    currentRestaurant?.deliveryFeeBase || 5000
-  );
-
-  const deliveryFee = deliveryInfo.fee;
-  const platformFee = 1500;
-  const grandTotal = cartSubtotal + deliveryFee + platformFee;
+  const deliveryFee = 7000; // Tarifa plana $7.000 COP en todo Valledupar
+  const platformFee = 0; // $0 COP tarifa de servicio DonDomi (100% gratis en el MVP)
+  const grandTotal = cartSubtotal + deliveryFee;
 
   const handleCheckout = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!customerName.trim() || !customerPhone.trim() || !deliveryStreet.trim()) {
-      alert('Por favor completa tu nombre, teléfono y dirección para la entrega.');
+    if (!customerName.trim() || !customerPhone.trim() || !deliveryNeighborhood.trim() || !deliveryStreet.trim()) {
+      alert('Por favor completa tu nombre, celular, barrio y dirección exacta para la entrega.');
       return;
     }
 
@@ -93,7 +88,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       items: orderItems,
       subtotal: cartSubtotal,
       deliveryFee,
-      serviceFee: platformFee,
+      serviceFee: 0,
       total: grandTotal,
       paymentMethod,
       paymentStatus: paymentMethod === 'EFECTIVO' ? 'PENDING' : 'COMPLETED',
@@ -101,17 +96,23 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
         id: `addr-${Date.now()}`,
         label: 'Entrega',
         street: deliveryStreet.trim(),
-        neighborhood: currentNeighborhood,
+        neighborhood: deliveryNeighborhood.trim(),
         city: 'Valledupar',
         reference: deliveryReference.trim() || undefined,
       },
       customerNotes: orderNotes.trim() || undefined,
       createdAt: new Date().toISOString(),
-      estimatedDeliveryTime: `${deliveryInfo.timeMin}–${deliveryInfo.timeMax} min`,
+      estimatedDeliveryTime: '30–45 min',
     };
 
     addOrder(newOrder);
     setPlacedOrder(newOrder);
+
+    // Recordar el pedido en el dispositivo del cliente para persistencia
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dondomi_active_order', newOrder.orderNumber);
+      localStorage.setItem('dondomi_active_order_time', Date.now().toString());
+    }
   };
 
   // Generador de mensaje de WhatsApp con formato para Colombia
@@ -335,18 +336,27 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                   </div>
 
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="text-[11px] font-bold text-slate-700">
-                        Dirección exacta
-                      </label>
-                      <span className="text-[10px] text-orange-600 font-semibold">
-                        Barrio: {currentNeighborhood}
-                      </span>
-                    </div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                      Barrio en Valledupar *
+                    </label>
                     <input
                       type="text"
                       required
-                      placeholder="Ej: Calle 8 # 6-30"
+                      placeholder="Ej: Novalito, La Nevada, Garupal, Los Cortijos..."
+                      value={deliveryNeighborhood}
+                      onChange={(e) => setDeliveryNeighborhood(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                      Dirección exacta (Calle / Carrera / Casa / Apto) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: Calle 8 # 6-30, Mz 4 Casa 12"
                       value={deliveryStreet}
                       onChange={(e) => setDeliveryStreet(e.target.value)}
                       className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
@@ -373,19 +383,25 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 <span className="text-xs font-extrabold text-slate-900 uppercase tracking-wider block">
                   Forma de pago en Valledupar
                 </span>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['NEQUI', 'DAVIPLATA', 'EFECTIVO'] as const).map((method) => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    { id: 'NEQUI', label: 'Nequi' },
+                    { id: 'BRE_B', label: 'Llave Bre-B' },
+                    { id: 'DAVIPLATA', label: 'Daviplata' },
+                    { id: 'EFECTIVO', label: 'Efectivo' },
+                    { id: 'CARD', label: 'Tarjeta (Wompi)' },
+                  ].map((method) => (
                     <button
                       type="button"
-                      key={method}
-                      onClick={() => setPaymentMethod(method)}
+                      key={method.id}
+                      onClick={() => setPaymentMethod(method.id as any)}
                       className={`p-2.5 rounded-xl text-xs font-bold border transition text-center ${
-                        paymentMethod === method
+                        paymentMethod === method.id
                           ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-2xs'
                           : 'border-slate-200 text-slate-600 bg-white hover:bg-slate-50'
                       }`}
                     >
-                      {method}
+                      {method.label}
                     </button>
                   ))}
                 </div>
@@ -394,19 +410,15 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               {/* Resumen de costos */}
               <div className="pt-4 space-y-1.5 text-xs text-slate-600">
                 <div className="flex justify-between">
-                  <span>Subtotal productos:</span>
+                  <span>Subtotal platos:</span>
                   <span>{formatCOP(cartSubtotal)}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="flex items-center gap-1">
                     <Bike className="w-3.5 h-3.5 text-orange-600" />
-                    Domicilio ({currentNeighborhood}):
+                    Domicilio fijo (Valledupar):
                   </span>
                   <span className="font-semibold text-slate-800">{formatCOP(deliveryFee)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Tarifa de servicio DonDomi:</span>
-                  <span>{formatCOP(platformFee)}</span>
                 </div>
                 <div className="pt-2 border-t border-slate-200 flex justify-between text-sm font-black text-slate-900">
                   <span>Total a pagar:</span>

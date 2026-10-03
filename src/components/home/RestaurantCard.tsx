@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Star, Clock, Bike, MapPin, ChevronRight } from 'lucide-react';
+import { Clock, Bike, MapPin, ChevronRight } from 'lucide-react';
 import { Restaurant } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { calculateDeliveryEstimate } from '@/lib/delivery';
@@ -62,13 +62,10 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
             )}
           </div>
 
-          {/* Rating Pill */}
-          <div className="bg-white/95 backdrop-blur-md text-slate-900 text-xs font-black px-2 py-1 rounded-xl shadow-sm flex items-center gap-1">
-            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-            <span>{restaurant.rating.toFixed(1)}</span>
-            <span className="text-[10px] font-normal text-slate-500">
-              ({restaurant.reviewsCount})
-            </span>
+          {/* Barrio Pill (muestra ubicación sin sesgo de calificaciones) */}
+          <div className="bg-slate-950/80 backdrop-blur-md text-white text-xs font-bold px-2.5 py-1 rounded-xl shadow-sm flex items-center gap-1 border border-white/20">
+            <MapPin className="w-3 h-3 text-orange-400" />
+            <span className="truncate max-w-[120px]">{restaurant.neighborhood}</span>
           </div>
         </div>
 

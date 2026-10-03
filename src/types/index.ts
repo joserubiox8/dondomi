@@ -87,10 +87,12 @@ export interface Restaurant {
   estimatedTimeMax: number; // Ej: 40
   deliveryFeeBase: number; // Base en COP, ej: 7000
   minOrderAmount: number; // Ej: 15000
-  commissionRate: number; // Porcentaje, ej: 15 (15%)
+  commissionRate: number; // Porcentaje, ej: 0 a 10%
   acceptsCash: boolean;
   acceptsNequi: boolean;
   acceptsDaviplata: boolean;
+  acceptsBreb?: boolean; // Llave Bre-B (Transferencias interbancarias inmediatas)
+  acceptsCard?: boolean; // Tarjetas crédito/débito (vía Wompi u otra pasarela)
   featured?: boolean;
   pin?: string; // PIN de 4 dígitos para acceso exclusivo de la cocina en /merchant
 }
@@ -104,7 +106,7 @@ export type OrderStatus =
   | 'DELIVERED'          // Entregado con éxito
   | 'CANCELLED';         // Cancelado
 
-export type PaymentMethod = 'EFECTIVO' | 'CASH' | 'NEQUI' | 'DAVIPLATA' | 'CARD';
+export type PaymentMethod = 'EFECTIVO' | 'CASH' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD';
 export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
 
 export interface SelectedOption {

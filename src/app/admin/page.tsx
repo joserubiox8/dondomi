@@ -26,7 +26,6 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
-import { VALLEDUPAR_NEIGHBORHOODS } from '@/data/mockData';
 import { formatCOP } from '@/lib/utils';
 import { Restaurant, Product, ProductOptionGroup } from '@/types';
 
@@ -81,15 +80,20 @@ export default function AdminPage() {
   // Modal para afiliar nuevo restaurante
   const [isAddRestModalOpen, setIsAddRestModalOpen] = useState(false);
   const [newRestName, setNewRestName] = useState('');
-  const [newRestNeighborhood, setNewRestNeighborhood] = useState(VALLEDUPAR_NEIGHBORHOODS[0]);
+  const [newRestNeighborhood, setNewRestNeighborhood] = useState('');
   const [newRestAddress, setNewRestAddress] = useState('');
   const [newRestPhone, setNewRestPhone] = useState('');
   const [newRestHours, setNewRestHours] = useState('11:00 AM - 10:00 PM');
   const [newRestBaseFee, setNewRestBaseFee] = useState(7000);
-  const [newRestCommission, setNewRestCommission] = useState(15);
+  const [newRestCommission, setNewRestCommission] = useState(0);
   const [newRestPin, setNewRestPin] = useState('1234');
-  const [newRestTags, setNewRestTags] = useState('Comida Típica, Asados');
+  const [newRestTags, setNewRestTags] = useState('Comida Rápida, Salchipapas');
   const [newRestDescription, setNewRestDescription] = useState('');
+  const [acceptsCash, setAcceptsCash] = useState(true);
+  const [acceptsNequi, setAcceptsNequi] = useState(true);
+  const [acceptsBreb, setAcceptsBreb] = useState(true);
+  const [acceptsDaviplata, setAcceptsDaviplata] = useState(true);
+  const [acceptsCard, setAcceptsCard] = useState(false);
 
   // Modal para gestionar menú textual
   const [menuModalRest, setMenuModalRest] = useState<Restaurant | null>(null);
@@ -101,12 +105,12 @@ export default function AdminPage() {
 
   // Cálculos de métricas
   const totalSales = orders.reduce((acc, o) => acc + o.total, 0);
-  const totalCommissions = orders.reduce((acc, o) => acc + o.subtotal * 0.15, 0);
+  const totalCommissions = orders.reduce((acc, o) => acc + o.subtotal * (0 / 100), 0);
 
   const handleCreateRestaurant = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRestName.trim() || !newRestAddress.trim() || !newRestPhone.trim()) {
-      alert('Por favor completa el nombre, dirección y teléfono del restaurante.');
+    if (!newRestName.trim() || !newRestAddress.trim() || !newRestPhone.trim() || !newRestNeighborhood.trim()) {
+      alert('Por favor completa el nombre, barrio, dirección y teléfono del restaurante.');
       return;
     }
 
@@ -117,14 +121,14 @@ export default function AdminPage() {
       id: newId,
       name: newRestName.trim(),
       slug,
-      description: newRestDescription.trim() || `Restaurante tradicional en ${newRestNeighborhood}, Valledupar.`,
+      description: newRestDescription.trim() || `Restaurante tradicional en ${newRestNeighborhood.trim()}, Valledupar.`,
       logoUrl: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=200&q=80',
       bannerUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1000&q=80',
       rating: 5.0,
       reviewsCount: 1,
       tags: newRestTags.split(',').map((t) => t.trim()).filter(Boolean),
       address: newRestAddress.trim(),
-      neighborhood: newRestNeighborhood,
+      neighborhood: newRestNeighborhood.trim(),
       phone: newRestPhone.trim(),
       isOpen: true,
       openingHours: newRestHours,
@@ -134,9 +138,11 @@ export default function AdminPage() {
       minOrderAmount: 15000,
       commissionRate: Number(newRestCommission),
       pin: newRestPin.trim() || '1234',
-      acceptsCash: true,
-      acceptsNequi: true,
-      acceptsDaviplata: true,
+      acceptsCash,
+      acceptsNequi,
+      acceptsBreb,
+      acceptsDaviplata,
+      acceptsCard,
       featured: false,
     };
 
@@ -145,12 +151,15 @@ export default function AdminPage() {
 
     // Reset fields
     setNewRestName('');
+    setNewRestNeighborhood('');
     setNewRestAddress('');
     setNewRestPhone('');
     setNewRestDescription('');
     setNewRestPin('1234');
     alert(`¡Restaurante "${created.name}" registrado y publicado con éxito!`);
   };
+
+
 
   const handleDuplicateProduct = (prod: Product) => {
     if (!menuModalRest) return;
@@ -394,7 +403,7 @@ export default function AdminPage() {
               </div>
             </div>
             <div className="text-2xl font-black text-amber-600">{formatCOP(totalCommissions)}</div>
-            <p className="text-[11px] text-slate-500">~15% promedio negociado</p>
+            <p className="text-[11px] text-slate-500">0% a 10% máx (Fase 1 gratuita)</p>
           </div>
         </div>
 
@@ -712,18 +721,9 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-100">
-              <h4 className="text-xs font-bold text-slate-800 mb-2">Barrios habilitados en Valledupar:</h4>
-              <div className="flex flex-wrap gap-2">
-                {VALLEDUPAR_NEIGHBORHOODS.map((b) => (
-                  <span
-                    key={b}
-                    className="bg-slate-100 text-slate-700 text-xs px-3 py-1 rounded-full border border-slate-200"
-                  >
-                    📍 {b}
-                  </span>
-                ))}
-              </div>
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span>💡 Cobertura abierta: los clientes escriben directamente su barrio y nomenclatura sin restricciones.</span>
+              <span className="font-semibold text-orange-600">Tarifa única $7.000 COP</span>
             </div>
           </div>
         )}
@@ -816,17 +816,14 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-700 block mb-1">Barrio en Valledupar *</label>
-                  <select
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: Novalito, La Nevada, Centro, Los Cortijos..."
                     value={newRestNeighborhood}
                     onChange={(e) => setNewRestNeighborhood(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
-                  >
-                    {VALLEDUPAR_NEIGHBORHOODS.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs"
+                  />
                 </div>
 
                 <div>
@@ -876,12 +873,14 @@ export default function AdminPage() {
                 </div>
 
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Comisión %</label>
+                  <label className="font-bold text-slate-700 block mb-1">Comisión % (0-10)</label>
                   <input
                     type="number"
+                    min={0}
+                    max={10}
                     value={newRestCommission}
                     onChange={(e) => setNewRestCommission(Number(e.target.value))}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs font-bold text-orange-600"
                   />
                 </div>
 
@@ -898,11 +897,65 @@ export default function AdminPage() {
                 </div>
               </div>
 
+              {/* Payment methods checkboxes */}
+              <div className="space-y-1.5 pt-1">
+                <label className="font-bold text-slate-700 block text-xs">
+                  Métodos de pago habilitados para este restaurante:
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
+                    <input
+                      type="checkbox"
+                      checked={acceptsCash}
+                      onChange={(e) => setAcceptsCash(e.target.checked)}
+                      className="rounded text-orange-600 focus:ring-orange-500"
+                    />
+                    <span className="font-semibold text-slate-800">💵 Efectivo</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
+                    <input
+                      type="checkbox"
+                      checked={acceptsNequi}
+                      onChange={(e) => setAcceptsNequi(e.target.checked)}
+                      className="rounded text-orange-600 focus:ring-orange-500"
+                    />
+                    <span className="font-semibold text-slate-800">💜 Nequi</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
+                    <input
+                      type="checkbox"
+                      checked={acceptsBreb}
+                      onChange={(e) => setAcceptsBreb(e.target.checked)}
+                      className="rounded text-orange-600 focus:ring-orange-500"
+                    />
+                    <span className="font-semibold text-slate-800">⚡ Llave Bre-B</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
+                    <input
+                      type="checkbox"
+                      checked={acceptsDaviplata}
+                      onChange={(e) => setAcceptsDaviplata(e.target.checked)}
+                      className="rounded text-orange-600 focus:ring-orange-500"
+                    />
+                    <span className="font-semibold text-slate-800">🔴 Daviplata</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
+                    <input
+                      type="checkbox"
+                      checked={acceptsCard}
+                      onChange={(e) => setAcceptsCard(e.target.checked)}
+                      className="rounded text-orange-600 focus:ring-orange-500"
+                    />
+                    <span className="font-semibold text-slate-800">💳 Tarjeta (Wompi)</span>
+                  </label>
+                </div>
+              </div>
+
               <div>
                 <label className="font-bold text-slate-700 block mb-1">Categorías / Etiquetas (separadas por coma)</label>
                 <input
                   type="text"
-                  placeholder="Ej: Pollo Asado, Parrilla, Criollo"
+                  placeholder="Ej: Salchipapas, Desgranados, Comida Rápida"
                   value={newRestTags}
                   onChange={(e) => setNewRestTags(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"

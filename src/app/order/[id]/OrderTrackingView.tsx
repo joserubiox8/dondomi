@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -37,6 +37,12 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
   const restaurant = restaurants.find(
     (r) => r.id === order?.restaurantId || r.name === order?.restaurantName
   );
+
+  useEffect(() => {
+    if (order && typeof window !== 'undefined') {
+      localStorage.setItem('dondomi_active_order', order.orderNumber);
+    }
+  }, [order]);
 
   if (!order) {
     return (
@@ -282,10 +288,12 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
               <span>Domicilio (Tarifa fija Valledupar):</span>
               <span className="font-bold text-slate-900">{formatCOP(order.deliveryFee)}</span>
             </div>
-            <div className="flex justify-between">
-              <span>Tarifa de servicio DonDomi:</span>
-              <span>{formatCOP(order.serviceFee)}</span>
-            </div>
+            {order.serviceFee > 0 && (
+              <div className="flex justify-between">
+                <span>Tarifa de servicio DonDomi:</span>
+                <span>{formatCOP(order.serviceFee)}</span>
+              </div>
+            )}
             <div className="pt-2 border-t border-slate-200 flex justify-between text-sm font-black text-slate-900">
               <span>Total a pagar:</span>
               <span className="text-base text-orange-600">{formatCOP(order.total)}</span>

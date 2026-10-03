@@ -38,27 +38,20 @@ export default function Header() {
           </div>
         </Link>
 
-        {/* Location selector button */}
-        <button
-          onClick={() => setIsLocationModalOpen(true)}
-          className="flex-1 max-w-xs flex items-center justify-between bg-slate-50 hover:bg-orange-50/60 border border-slate-200/80 rounded-full px-3 py-1.5 transition text-left group"
-          title="Cambiar dirección de entrega en Valledupar"
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
-              <MapPin className="w-3.5 h-3.5 text-orange-600" />
-            </div>
-            <div className="truncate">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">
-                Entregar en
-              </span>
-              <span className="text-xs font-bold text-slate-800 truncate block">
-                {currentNeighborhood}, Valledupar
-              </span>
-            </div>
+        {/* City and flat delivery badge */}
+        <div className="flex-1 max-w-xs flex items-center gap-2 bg-slate-50 border border-slate-200/80 rounded-full px-3 py-1.5 min-w-0">
+          <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+            <MapPin className="w-3.5 h-3.5 text-orange-600" />
           </div>
-          <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-orange-600 ml-1 flex-shrink-0" />
-        </button>
+          <div className="truncate">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">
+              Valledupar, Cesar
+            </span>
+            <span className="text-xs font-bold text-slate-800 truncate block">
+              Domicilio fijo $7.000 COP
+            </span>
+          </div>
+        </div>
 
         {/* Quick Cart / Order summary button */}
         {cartCount > 0 && (

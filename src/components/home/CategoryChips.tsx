@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ChevronRight } from 'lucide-react';
 import { FOOD_CATEGORIES } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 
@@ -10,11 +11,15 @@ export default function CategoryChips() {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-slate-900 tracking-tight">¿Qué se te antoja hoy?</h2>
-        <span className="text-xs font-semibold text-orange-600">Valledupar</span>
+        <h2 className="text-base font-extrabold text-slate-900 tracking-tight">¿Qué se te antoja hoy?</h2>
+        <div className="flex items-center gap-1 bg-orange-50 border border-orange-200 text-orange-700 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide animate-pulse">
+          <span>Desliza</span>
+          <ChevronRight className="w-3 h-3 text-orange-600" />
+        </div>
       </div>
 
-      <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1 -mx-4 px-4">
+      <div className="relative">
+        <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1 -mx-4 px-4 scroll-smooth">
         {/* "Todos" button */}
         <button
           onClick={() => setSelectedCategorySlug(null)}
@@ -77,6 +82,14 @@ export default function CategoryChips() {
             </button>
           );
         })}
+        </div>
+
+        {/* Flecha indicadora parpadeante para deslizar en móviles */}
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none pr-1 sm:hidden">
+          <div className="w-6 h-6 rounded-full bg-slate-900/80 text-white flex items-center justify-center shadow-md animate-pulse backdrop-blur-xs">
+            <ChevronRight className="w-3.5 h-3.5 text-orange-400 stroke-[3]" />
+          </div>
+        </div>
       </div>
     </div>
   );
