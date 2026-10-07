@@ -27,6 +27,8 @@ export function restaurantToDb(r: Restaurant) {
     accepts_cash: r.acceptsCash,
     accepts_nequi: r.acceptsNequi,
     accepts_daviplata: r.acceptsDaviplata,
+    accepts_breb: r.acceptsBreb ?? true,
+    accepts_card: r.acceptsCard ?? false,
     featured: r.featured || false,
     pin: r.pin || '1234',
   };
@@ -52,10 +54,12 @@ export function dbToRestaurant(data: any): Restaurant {
     estimatedTimeMax: data.estimated_time_max || 40,
     deliveryFeeBase: Number(data.delivery_fee_base) || 7000,
     minOrderAmount: Number(data.min_order_amount) || 15000,
-    commissionRate: Number(data.commission_rate) || 15,
+    commissionRate: Number(data.commission_rate) || 0,
     acceptsCash: data.accepts_cash ?? true,
     acceptsNequi: data.accepts_nequi ?? true,
+    acceptsBreb: data.accepts_breb ?? true,
     acceptsDaviplata: data.accepts_daviplata ?? true,
+    acceptsCard: data.accepts_card ?? false,
     featured: data.featured ?? false,
     pin: data.pin || '1234',
   };

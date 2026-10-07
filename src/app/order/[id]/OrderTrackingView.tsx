@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -14,10 +14,12 @@ import {
   MessageCircle,
   AlertCircle,
   Home,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
-import { OrderStatus } from '@/types';
+import { Order, OrderStatus } from '@/types';
+import { supabase } from '@/lib/supabase';
 
 interface OrderTrackingViewProps {
   orderParam: string;
@@ -25,14 +27,68 @@ interface OrderTrackingViewProps {
 
 export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps) {
   const { orders, restaurants } = useApp();
+  const [supabaseOrder, setSupabaseOrder] = useState<Order | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  // Buscar pedido por ID o por orderNumber (ej: "DD-1042")
-  const order = orders.find(
+  // Buscar pedido en AppContext por ID o por orderNumber (ej: "DD-1042")
+  const contextOrder = orders.find(
     (o) =>
       o.id === orderParam ||
       o.orderNumber.toLowerCase() === orderParam.toLowerCase() ||
       o.orderNumber.toLowerCase() === `dd-${orderParam}`.toLowerCase()
   );
+
+  const order = contextOrder || supabaseOrder;
+
+  // Consulta directa a Supabase en caso de acceso por URL directa o refresh
+  useEffect(() => {
+    if (contextOrder) {
+      setLoading(false);
+      return;
+    }
+
+    async function fetchFromSupabase() {
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .or(`id.eq.${orderParam},order_number.ilike.%${orderParam}%`)
+          .maybeSingle();
+
+        if (!error && data) {
+          setSupabaseOrder({
+            id: data.id,
+            orderNumber: data.order_number,
+            customerId: data.customer_name,
+            customerName: data.customer_name,
+            customerPhone: data.customer_phone,
+            restaurantId: data.restaurant_id || '',
+            restaurantName: data.restaurant_name,
+            driverId: data.driver_id,
+            driverName: data.driver_name,
+            status: data.status,
+            items: data.items || [],
+            subtotal: Number(data.subtotal),
+            deliveryFee: Number(data.delivery_fee),
+            serviceFee: Number(data.service_fee || 0),
+            total: Number(data.total),
+            paymentMethod: data.payment_method,
+            paymentStatus: data.payment_status,
+            deliveryAddress: data.delivery_address,
+            customerNotes: data.customer_notes,
+            estimatedDeliveryTime: data.estimated_delivery_time,
+            createdAt: data.created_at,
+          });
+        }
+      } catch (e) {
+        console.error('Error cargando pedido desde Supabase:', e);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchFromSupabase();
+  }, [orderParam, contextOrder]);
 
   const restaurant = restaurants.find(
     (r) => r.id === order?.restaurantId || r.name === order?.restaurantName
@@ -43,6 +99,16 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
       localStorage.setItem('dondomi_active_order', order.orderNumber);
     }
   }, [order]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <Loader2 className="w-10 h-10 text-orange-600 animate-spin mb-3" />
+        <h2 className="text-base font-bold text-slate-800">Cargando estado del pedido...</h2>
+        <p className="text-xs text-slate-400 mt-1">Conectando con la cocina en Valledupar</p>
+      </div>
+    );
+  }
 
   if (!order) {
     return (

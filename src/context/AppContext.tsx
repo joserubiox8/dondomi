@@ -91,14 +91,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function loadData() {
       try {
-        // 1. Cargar restaurantes
+        // 1. Cargar restaurantes (Mezclando Supabase con iniciales para no perder Salchipapas Donde Chalo ni locales)
         const { data: restData, error: restError } = await supabase
           .from('restaurants')
           .select('*')
           .order('name');
 
         if (!restError && restData && restData.length > 0) {
-          setRestaurants(restData.map(dbToRestaurant));
+          const dbRests = restData.map(dbToRestaurant);
+          const restMap = new Map<string, Restaurant>();
+          INITIAL_RESTAURANTS.forEach((r) => restMap.set(r.id, r));
+          dbRests.forEach((r) => restMap.set(r.id, r));
+          setRestaurants(Array.from(restMap.values()));
         }
 
         // 2. Cargar platos
@@ -108,13 +112,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           .order('name');
 
         if (!prodError && prodData && prodData.length > 0) {
-          const map: Record<string, Product[]> = {};
+          const map: Record<string, Product[]> = { ...INITIAL_PRODUCTS };
           prodData.forEach((row) => {
             const p = dbToProduct(row);
             if (!map[p.restaurantId]) map[p.restaurantId] = [];
-            map[p.restaurantId].push(p);
+            const existingIdx = map[p.restaurantId].findIndex((item) => item.id === p.id);
+            if (existingIdx >= 0) {
+              map[p.restaurantId][existingIdx] = p;
+            } else {
+              map[p.restaurantId].push(p);
+            }
           });
-          setProductsByRestaurant((prev) => ({ ...prev, ...map }));
+          setProductsByRestaurant(map);
         }
 
         // 3. Cargar pedidos
@@ -138,7 +147,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             items: row.items || [],
             subtotal: Number(row.subtotal),
             deliveryFee: Number(row.delivery_fee),
-            serviceFee: Number(row.service_fee),
+            serviceFee: Number(row.service_fee || 0),
             total: Number(row.total),
             paymentMethod: row.payment_method,
             paymentStatus: row.payment_status,
@@ -179,7 +188,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               items: row.items || [],
               subtotal: Number(row.subtotal),
               deliveryFee: Number(row.delivery_fee),
-              serviceFee: Number(row.service_fee),
+              serviceFee: Number(row.service_fee || 0),
               total: Number(row.total),
               paymentMethod: row.payment_method,
               paymentStatus: row.payment_status,
@@ -192,7 +201,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           } else if (payload.eventType === 'UPDATE') {
             const row: any = payload.new;
             setOrders((prev) =>
-              prev.map((o) => (o.id === row.id ? { ...o, status: row.status } : o))
+              prev.map((o) =>
+                o.id === row.id
+                  ? {
+                      ...o,
+                      status: row.status,
+                      driverId: row.driver_id,
+                      driverName: row.driver_name,
+                      paymentStatus: row.payment_status,
+                    }
+                  : o
+              )
             );
           }
         }
@@ -204,16 +223,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Manejo de restaurantes sincronizado con Supabase
+  // Manejo de restaurantes sincronizado con Supabase (con fallback tolerante a columnas)
   const addRestaurant = async (newRest: Restaurant) => {
     // 1. Actualización optimista inmediata en la UI
     setRestaurants((prev) => [newRest, ...prev]);
 
     // 2. Persistencia en Supabase
     try {
-      const dbRow = restaurantToDb(newRest);
+      const dbRow: any = restaurantToDb(newRest);
       const { error } = await supabase.from('restaurants').insert([dbRow]);
-      if (error) console.error('Error guardando restaurante en Supabase:', error);
+      if (error) {
+        if (error.code === 'PGRST204') {
+          // Si columnas nuevas aún no existen en DB, intentar guardar columnas estándar
+          const fallbackRow = { ...dbRow };
+          delete fallbackRow.pin;
+          delete fallbackRow.accepts_breb;
+          delete fallbackRow.accepts_card;
+          await supabase.from('restaurants').insert([fallbackRow]);
+        } else {
+          console.error('Error guardando restaurante en Supabase:', error);
+        }
+      }
     } catch (e) {
       console.error(e);
     }
@@ -222,8 +252,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateRestaurant = async (updated: Restaurant) => {
     setRestaurants((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
     try {
-      const dbRow = restaurantToDb(updated);
-      await supabase.from('restaurants').update(dbRow).eq('id', updated.id);
+      const dbRow: any = restaurantToDb(updated);
+      const { error } = await supabase.from('restaurants').update(dbRow).eq('id', updated.id);
+      if (error && error.code === 'PGRST204') {
+        const fallbackRow = { ...dbRow };
+        delete fallbackRow.pin;
+        delete fallbackRow.accepts_breb;
+        delete fallbackRow.accepts_card;
+        await supabase.from('restaurants').update(fallbackRow).eq('id', updated.id);
+      }
     } catch (e) {
       console.error(e);
     }
