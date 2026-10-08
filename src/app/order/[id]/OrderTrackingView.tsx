@@ -270,6 +270,27 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
           </div>
         </div>
 
+        {/* Repartidor Asignado en Ruta */}
+        {order.driverName && (
+          <div className="bg-blue-50 border border-blue-200 rounded-3xl p-4 flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                <Bike className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block">
+                  Domiciliario Asignado
+                </span>
+                <h4 className="font-extrabold text-slate-900 text-sm">{order.driverName}</h4>
+                <span className="text-[11px] text-slate-500">Repartidor DonDomi Valledupar</span>
+              </div>
+            </div>
+            <div className="bg-blue-100 text-blue-800 font-bold px-2.5 py-1 rounded-xl text-[11px]">
+              En camino
+            </div>
+          </div>
+        )}
+
         {/* Contacto con el Restaurante */}
         <div className="bg-white rounded-3xl p-4 border border-slate-200 shadow-xs flex items-center justify-between gap-3">
           <div>

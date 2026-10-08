@@ -38,6 +38,8 @@ export default function AdminPage() {
     productsByRestaurant,
     addProduct,
     deleteProduct,
+    currentUser,
+    logout,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'RESTAURANTES' | 'PEDIDOS' | 'TARIFAS' | 'ARQUITECTURA'>('RESTAURANTES');
@@ -48,13 +50,17 @@ export default function AdminPage() {
   const [masterPinError, setMasterPinError] = useState<string | null>(null);
 
   React.useEffect(() => {
+    if (currentUser?.role === 'ADMINISTRADOR') {
+      setIsAdminAuthenticated(true);
+      return;
+    }
     if (typeof window !== 'undefined') {
       const auth = sessionStorage.getItem('admin_master_auth');
       if (auth === 'true') {
         setIsAdminAuthenticated(true);
       }
     }
-  }, []);
+  }, [currentUser]);
 
   const handleMasterPinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,6 +79,9 @@ export default function AdminPage() {
   const handleAdminLock = () => {
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem('admin_master_auth');
+    }
+    if (currentUser?.role === 'ADMINISTRADOR') {
+      logout();
     }
     setIsAdminAuthenticated(false);
   };

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserRole, Product, SelectedOption, Restaurant, Order, OrderStatus } from '@/types';
+import { UserRole, User, Product, SelectedOption, Restaurant, Order, OrderStatus } from '@/types';
 import { RESTAURANTS as INITIAL_RESTAURANTS, PRODUCTS_BY_RESTAURANT as INITIAL_PRODUCTS, MOCK_ORDERS as INITIAL_ORDERS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
 import { dbToRestaurant, restaurantToDb, dbToProduct, productToDb } from '@/lib/mappers';
@@ -16,6 +16,13 @@ export interface CartItem {
 }
 
 interface AppContextType {
+  // Autenticación Real de la Plataforma
+  currentUser: User | null;
+  loginAsAdmin: (pin: string) => Promise<{ success: boolean; error?: string }>;
+  loginAsRestaurant: (restaurantId: string, pin: string) => Promise<{ success: boolean; error?: string }>;
+  loginAsDriver: (name: string, phone: string, pin: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => void;
+
   // Ubicación del cliente en Valledupar
   currentNeighborhood: string;
   setCurrentNeighborhood: (neighborhood: string) => void;
@@ -67,6 +74,7 @@ interface AppContextType {
   orders: Order[];
   addOrder: (order: Order) => Promise<void>;
   updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
+  claimOrder: (orderId: string, driverName: string, driverPhone?: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -86,6 +94,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [restaurants, setRestaurants] = useState<Restaurant[]>(INITIAL_RESTAURANTS);
   const [productsByRestaurant, setProductsByRestaurant] = useState<Record<string, Product[]>>(INITIAL_PRODUCTS);
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
+
+  // Autenticación Real de la Plataforma
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  // Restaurar sesión de usuario si existe
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('dondomi_auth_user');
+        if (saved) {
+          const parsed: User = JSON.parse(saved);
+          setCurrentUser(parsed);
+          setActiveRole(parsed.role || 'CLIENTE');
+        }
+      } catch (err) {
+        console.error('Error restaurando sesión:', err);
+      }
+    }
+  }, []);
 
   // Cargar datos iniciales desde Supabase
   useEffect(() => {
@@ -386,6 +413,113 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Asignar pedido al domiciliario activo
+  const claimOrder = async (orderId: string, driverName: string, driverPhone?: string) => {
+    const driverId = currentUser?.id || `drv-${Date.now()}`;
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'ON_THE_WAY',
+              driverId,
+              driverName,
+            }
+          : o
+      )
+    );
+
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          status: 'ON_THE_WAY',
+          driver_id: driverId,
+          driver_name: driverName,
+        })
+        .eq('id', orderId);
+    } catch (e) {
+      console.error('Error asignando repartidor:', e);
+    }
+  };
+
+  // Métodos de autenticación unificada
+  const loginAsAdmin = async (pin: string): Promise<{ success: boolean; error?: string }> => {
+    if (pin.trim() !== '2026') {
+      return { success: false, error: 'PIN Maestro de Administrador incorrecto (PIN: 2026).' };
+    }
+    const user: User = {
+      id: 'admin-master',
+      name: 'Administrador DonDomi',
+      role: 'ADMINISTRADOR',
+      createdAt: new Date().toISOString(),
+    };
+    setCurrentUser(user);
+    setActiveRole('ADMINISTRADOR');
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dondomi_auth_user', JSON.stringify(user));
+      sessionStorage.setItem('admin_master_auth', 'true');
+    }
+    return { success: true };
+  };
+
+  const loginAsRestaurant = async (restaurantId: string, pin: string): Promise<{ success: boolean; error?: string }> => {
+    const rest = restaurants.find((r) => r.id === restaurantId);
+    if (!rest) {
+      return { success: false, error: 'Restaurante no encontrado.' };
+    }
+    const expectedPin = rest.pin || '1234';
+    if (pin.trim() !== expectedPin) {
+      return { success: false, error: 'PIN de Cocina incorrecto para este restaurante.' };
+    }
+    const user: User = {
+      id: `user-${rest.id}`,
+      name: rest.name,
+      role: 'RESTAURANTE',
+      restaurantId: rest.id,
+      phone: rest.phone,
+      createdAt: new Date().toISOString(),
+    };
+    setCurrentUser(user);
+    setActiveRole('RESTAURANTE');
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dondomi_auth_user', JSON.stringify(user));
+      sessionStorage.setItem(`merchant_auth_${rest.id}`, 'true');
+    }
+    return { success: true };
+  };
+
+  const loginAsDriver = async (name: string, phone: string, pin: string): Promise<{ success: boolean; error?: string }> => {
+    if (!name.trim() || !phone.trim()) {
+      return { success: false, error: 'Completa tu nombre y celular para iniciar turno.' };
+    }
+    if (pin.trim() !== '1234') {
+      return { success: false, error: 'PIN de Domiciliario incorrecto (PIN: 1234).' };
+    }
+    const user: User = {
+      id: `drv-${phone.trim().replace(/\D/g, '') || Date.now()}`,
+      name: name.trim(),
+      phone: phone.trim(),
+      role: 'DOMICILIARIO',
+      createdAt: new Date().toISOString(),
+    };
+    setCurrentUser(user);
+    setActiveRole('DOMICILIARIO');
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dondomi_auth_user', JSON.stringify(user));
+    }
+    return { success: true };
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+    setActiveRole('CLIENTE');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('dondomi_auth_user');
+      sessionStorage.removeItem('admin_master_auth');
+    }
+  };
+
   // Totales del carrito
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
   const cartSubtotal = cart.reduce((acc, item) => acc + item.itemTotal, 0);
@@ -494,6 +628,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addProduct,
         deleteProduct,
         toggleProductAvailability,
+        currentUser,
+        loginAsAdmin,
+        loginAsRestaurant,
+        loginAsDriver,
+        logout,
+        claimOrder,
         orders,
         addOrder,
         updateOrderStatus,

@@ -9,9 +9,10 @@ export type UserRole = 'CLIENTE' | 'RESTAURANTE' | 'ADMINISTRADOR' | 'DOMICILIAR
 export interface User {
   id: string;
   name: string;
-  email: string;
-  phone: string;
+  email?: string;
+  phone?: string;
   role: UserRole;
+  restaurantId?: string; // Para usuarios de cocina / restaurante
   avatarUrl?: string;
   createdAt: string;
 }

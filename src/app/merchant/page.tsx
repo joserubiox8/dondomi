@@ -21,6 +21,7 @@ import {
   MapPin,
   Phone,
   FileText,
+  Bike,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
@@ -34,9 +35,15 @@ export default function MerchantPage() {
     productsByRestaurant,
     updateOrderStatus,
     toggleProductAvailability,
+    currentUser,
+    logout,
   } = useApp();
 
-  const [selectedRestId, setSelectedRestId] = useState<string>('rest-1');
+  const [selectedRestId, setSelectedRestId] = useState<string>(
+    currentUser?.role === 'RESTAURANTE' && currentUser.restaurantId
+      ? currentUser.restaurantId
+      : 'rest-1'
+  );
 
   // Autenticación por PIN de 4 dígitos
   const [authenticatedRestId, setAuthenticatedRestId] = useState<string | null>(null);
@@ -49,6 +56,16 @@ export default function MerchantPage() {
 
   // Modal para ticket térmico de comanda
   const [ticketOrder, setTicketOrder] = useState<Order | null>(null);
+
+  // Sincronizar restaurante según usuario logueado
+  useEffect(() => {
+    if (currentUser?.role === 'RESTAURANTE' && currentUser.restaurantId) {
+      setSelectedRestId(currentUser.restaurantId);
+      setAuthenticatedRestId(currentUser.restaurantId);
+    } else if (currentUser?.role === 'ADMINISTRADOR') {
+      setAuthenticatedRestId(selectedRestId);
+    }
+  }, [currentUser, selectedRestId]);
 
   const restaurant =
     restaurants.find((r) => r.id === selectedRestId) ||
@@ -68,12 +85,16 @@ export default function MerchantPage() {
   const pendingOrders = restaurantOrders.filter((o) => o.status === 'PENDING');
   const preparingOrders = restaurantOrders.filter((o) => o.status === 'PREPARING');
   const dispatchedOrders = restaurantOrders.filter(
-    (o) => o.status === 'ON_THE_WAY' || o.status === 'DELIVERED'
+    (o) => o.status === 'READY_FOR_PICKUP' || o.status === 'ON_THE_WAY' || o.status === 'DELIVERED'
   );
 
   // Revisar si ya está autenticado en sessionStorage para este restaurante
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      if (currentUser?.role === 'ADMINISTRADOR' || (currentUser?.role === 'RESTAURANTE' && currentUser.restaurantId === selectedRestId)) {
+        setAuthenticatedRestId(selectedRestId);
+        return;
+      }
       const isAuth = sessionStorage.getItem(`merchant_auth_${selectedRestId}`);
       if (isAuth === 'true') {
         setAuthenticatedRestId(selectedRestId);
@@ -83,7 +104,7 @@ export default function MerchantPage() {
       setPinInput('');
       setPinError(null);
     }
-  }, [selectedRestId]);
+  }, [selectedRestId, currentUser]);
 
   // Alerta sonora en tiempo real cuando llega un nuevo pedido PENDING
   useEffect(() => {
@@ -117,6 +138,9 @@ export default function MerchantPage() {
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem(`merchant_auth_${selectedRestId}`);
     }
+    if (currentUser?.role === 'RESTAURANTE') {
+      logout();
+    }
     setAuthenticatedRestId(null);
     setPinInput('');
   };
@@ -134,7 +158,10 @@ export default function MerchantPage() {
     }, 250);
   };
 
-  const isUnlocked = authenticatedRestId === selectedRestId;
+  const isUnlocked =
+    authenticatedRestId === selectedRestId ||
+    currentUser?.role === 'ADMINISTRADOR' ||
+    (currentUser?.role === 'RESTAURANTE' && currentUser.restaurantId === selectedRestId);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20">
@@ -420,23 +447,61 @@ export default function MerchantPage() {
                         )}
 
                         {order.status === 'PREPARING' && (
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'ON_THE_WAY')}
-                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md"
-                          >
-                            <PackageCheck className="w-4 h-4" />
-                            <span>Pedido Empacado · Despachar con mi domiciliario</span>
-                          </button>
+                          <div className="flex-1 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => updateOrderStatus(order.id, 'READY_FOR_PICKUP')}
+                              className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-extrabold py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md"
+                            >
+                              <PackageCheck className="w-4 h-4" />
+                              <span>Empacado · Solicitar Repartidor</span>
+                            </button>
+                            <button
+                              onClick={() => updateOrderStatus(order.id, 'ON_THE_WAY')}
+                              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-extrabold py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md"
+                            >
+                              <Bike className="w-4 h-4" />
+                              <span>Despachar con Domiciliario Propio</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {order.status === 'READY_FOR_PICKUP' && (
+                          <div className="flex-1 flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
+                            <div className="text-xs text-amber-900">
+                              <span className="font-bold block">Empacado y listo</span>
+                              <span className="text-[11px] text-amber-700">
+                                {order.driverName
+                                  ? `Repartidor asignado: ${order.driverName}`
+                                  : 'Visible para domiciliarios en la red DonDomi'}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => updateOrderStatus(order.id, 'ON_THE_WAY')}
+                              className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition"
+                            >
+                              Marcar en camino
+                            </button>
+                          </div>
                         )}
 
                         {order.status === 'ON_THE_WAY' && (
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'DELIVERED')}
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            <span>Marcar como Entregado con Éxito</span>
-                          </button>
+                          <div className="flex-1 flex flex-wrap items-center justify-between gap-2 bg-blue-50 border border-blue-200 p-2.5 rounded-xl">
+                            <div className="text-xs text-blue-900">
+                              <span className="font-bold block">En camino al cliente</span>
+                              {order.driverName && (
+                                <span className="text-[11px] text-blue-700 block">
+                                  Repartidor: {order.driverName}
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => updateOrderStatus(order.id, 'DELIVERED')}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-2 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md"
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>Confirmar Entrega</span>
+                            </button>
+                          </div>
                         )}
 
                         {order.status === 'DELIVERED' && (
