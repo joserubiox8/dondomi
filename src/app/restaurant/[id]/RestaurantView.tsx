@@ -5,9 +5,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import {
   ArrowLeft,
-  Star,
-  Clock,
-  Bike,
   MapPin,
   Plus,
   Phone,
@@ -18,7 +15,6 @@ import {
 import { RESTAURANTS, PRODUCTS_BY_RESTAURANT } from '@/data/mockData';
 import { Product } from '@/types';
 import { useApp } from '@/context/AppContext';
-import { calculateDeliveryEstimate } from '@/lib/delivery';
 import { formatCOP } from '@/lib/utils';
 import ProductModal from '@/components/restaurant/ProductModal';
 
@@ -67,15 +63,6 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
     );
   }
 
-  // Cálculo dinámico de entrega para Valledupar
-  const deliveryInfo = calculateDeliveryEstimate(
-    restaurant.neighborhood,
-    currentNeighborhood,
-    restaurant.deliveryFeeBase,
-    restaurant.estimatedTimeMin,
-    restaurant.estimatedTimeMax
-  );
-
   return (
     <div className="min-h-screen bg-slate-50 pb-52 sm:pb-36">
       {/* Top Floating Back Bar */}
@@ -98,11 +85,11 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 pt-3 space-y-5">
-        {/* Restaurant Banner & Profile Card */}
-        <div className="bg-white rounded-3xl overflow-hidden border border-slate-200/80 shadow-xs">
-          {/* Banner Hero */}
-          <div className="relative h-48 sm:h-60 w-full bg-slate-100">
+      <div className="max-w-3xl mx-auto px-4 pt-3 space-y-4">
+        {/* Restaurant Compact Banner & Profile Card */}
+        <div className="bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-2xs">
+          {/* Banner Hero Compacto */}
+          <div className="relative h-28 sm:h-36 w-full bg-slate-100">
             <Image
               src={restaurant.bannerUrl}
               alt={restaurant.name}
@@ -113,106 +100,82 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
 
-            <div className="absolute top-3 left-3">
+            <div className="absolute top-2.5 left-3">
               {restaurant.isOpen ? (
-                <span className="bg-emerald-500 text-white text-xs font-black uppercase px-3 py-1 rounded-full shadow-sm flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
-                  Abierto ahora
+                <span className="bg-emerald-500 text-white text-[11px] font-black uppercase px-2.5 py-0.5 rounded-full shadow-sm flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                  Abierto
                 </span>
               ) : (
-                <span className="bg-slate-900/90 text-slate-300 text-xs font-bold uppercase px-3 py-1 rounded-full backdrop-blur-xs">
-                  Cerrado · Abre mañana
+                <span className="bg-slate-900/90 text-slate-300 text-[11px] font-bold uppercase px-2.5 py-0.5 rounded-full backdrop-blur-xs">
+                  Cerrado
                 </span>
               )}
             </div>
 
             {/* Restaurant Logo overlay */}
-            <div className="absolute bottom-3 left-4 flex items-end gap-3">
-              <div className="w-16 h-16 rounded-2xl bg-white p-1 shadow-lg relative overflow-hidden border-2 border-white flex-shrink-0">
+            <div className="absolute bottom-2.5 left-3.5 flex items-end gap-2.5">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white p-0.5 shadow-md relative overflow-hidden border-2 border-white flex-shrink-0">
                 <Image
                   src={restaurant.logoUrl}
                   alt={`${restaurant.name} logo`}
                   fill
-                  sizes="64px"
+                  sizes="56px"
                   className="object-cover rounded-xl"
                 />
               </div>
-              <div className="text-white pb-1">
-                <h2 className="text-xl sm:text-2xl font-black drop-shadow-md">
+              <div className="text-white pb-0.5">
+                <h2 className="text-lg sm:text-xl font-black drop-shadow-md leading-tight">
                   {restaurant.name}
                 </h2>
-                <p className="text-xs text-slate-200 drop-shadow-xs">
+                <p className="text-[11px] text-slate-200 drop-shadow-xs line-clamp-1">
                   {restaurant.tags.join(' · ')}
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Details & Delivery Matrix info */}
-          <div className="p-4 space-y-4">
-            <p className="text-xs text-slate-600 leading-relaxed">
-              {restaurant.description}
-            </p>
-
-            {/* Delivery highlights */}
-            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100 text-center">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Tiempo estimado
-                </span>
-                <span className="text-xs sm:text-sm font-extrabold text-slate-800 flex items-center justify-center gap-1 mt-0.5">
-                  <Clock className="w-3.5 h-3.5 text-orange-600" />
-                  {deliveryInfo.timeMin}–{deliveryInfo.timeMax} min
-                </span>
-              </div>
-
-              <div className="border-x border-slate-200">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Domicilio Fijo
-                </span>
-                <span className="text-xs sm:text-sm font-extrabold text-orange-600 flex items-center justify-center gap-1 mt-0.5">
-                  <Bike className="w-3.5 h-3.5 text-orange-600" />
-                  $ 7.000
-                </span>
-              </div>
-
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Pedido Mínimo
-                </span>
-                <span className="text-xs sm:text-sm font-extrabold text-slate-800 mt-0.5 block">
-                  {formatCOP(restaurant.minOrderAmount)}
-                </span>
-              </div>
-            </div>
+          {/* Details info */}
+          <div className="p-3 sm:p-4 space-y-2">
+            {restaurant.description && (
+              <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
+                {restaurant.description}
+              </p>
+            )}
 
             {/* Address and schedule */}
-            <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100 gap-2">
-              <span className="flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                {restaurant.address} ({restaurant.neighborhood})
+            <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-1.5 border-t border-slate-100 gap-1.5">
+              <span className="flex items-center gap-1 font-medium text-slate-700">
+                <MapPin className="w-3.5 h-3.5 text-orange-600" />
+                {restaurant.address} · {restaurant.neighborhood}
               </span>
-              <span>Horario: {restaurant.openingHours}</span>
+              <span className="text-slate-500">Horario: {restaurant.openingHours}</span>
             </div>
           </div>
         </div>
 
-        {/* Category Pills inside Restaurant */}
-        <div className="sticky top-16 z-20 bg-slate-50/95 backdrop-blur-md py-2 -mx-4 px-4 overflow-x-auto no-scrollbar border-b border-slate-200/60">
+        {/* Category Pills inside Restaurant con animación y alto contraste */}
+        <div className="sticky top-16 z-20 bg-slate-50/95 backdrop-blur-md py-2.5 -mx-4 px-4 overflow-x-auto no-scrollbar border-b border-slate-200/60">
           <div className="flex items-center gap-2">
-            {menuCategories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition whitespace-nowrap ${
-                  selectedCategory === cat
-                    ? 'bg-orange-600 text-white shadow-xs'
-                    : 'bg-white text-slate-700 border border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                {cat === 'TODOS' ? 'Todo el menú' : cat}
-              </button>
-            ))}
+            {menuCategories.map((cat) => {
+              const isSelected = selectedCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-4 py-2 rounded-2xl text-xs font-black transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-95 flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-slate-950 text-white border-2 border-orange-500 shadow-lg shadow-orange-500/25 scale-105 ring-2 ring-orange-500/30'
+                      : 'bg-white text-slate-700 border-2 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  {isSelected && (
+                    <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse inline-block" />
+                  )}
+                  <span>{cat === 'TODOS' ? 'Todo el menú' : cat}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 

@@ -26,11 +26,11 @@ export default function CartFloatBar() {
               <span>{cartCount}</span>
             </div>
             <div className="text-left min-w-0">
-              <span className="text-[10px] font-black uppercase tracking-wider text-orange-400 block leading-tight">
+              <span className="text-sm sm:text-base font-black text-white block leading-tight tracking-tight">
                 Ver Canasta
               </span>
-              <p className="text-xs sm:text-sm font-bold text-white truncate max-w-[150px] sm:max-w-[210px]">
-                {cartRestaurantName}
+              <p className="text-xs font-bold text-orange-400 truncate max-w-[150px] sm:max-w-[220px] mt-0.5">
+                {cartCount} {cartCount === 1 ? 'plato' : 'platos'} · {cartRestaurantName}
               </p>
             </div>
           </div>

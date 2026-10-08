@@ -300,10 +300,10 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 ))}
               </div>
 
-              {/* Datos de entrega en Valledupar */}
+              {/* Datos de entrega */}
               <div className="pt-4 space-y-3">
                 <span className="text-xs font-extrabold text-slate-900 uppercase tracking-wider block">
-                  Datos de Entrega en Valledupar
+                  Datos de Entrega
                 </span>
 
                 <div className="space-y-2 text-xs">
@@ -337,7 +337,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
 
                   <div>
                     <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Barrio en Valledupar *
+                      Barrio *
                     </label>
                     <input
                       type="text"
@@ -381,7 +381,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               {/* Selector de método de pago */}
               <div className="pt-4 space-y-2">
                 <span className="text-xs font-extrabold text-slate-900 uppercase tracking-wider block">
-                  Forma de pago en Valledupar
+                  Forma de pago
                 </span>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[
@@ -416,7 +416,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 <div className="flex justify-between items-center">
                   <span className="flex items-center gap-1">
                     <Bike className="w-3.5 h-3.5 text-orange-600" />
-                    Domicilio fijo (Valledupar):
+                    Domicilio fijo:
                   </span>
                   <span className="font-semibold text-slate-800">{formatCOP(deliveryFee)}</span>
                 </div>
