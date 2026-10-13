@@ -34,6 +34,7 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
   const [cancelReason, setCancelReason] = useState<string>('Me equivoqué de plato o dirección');
   const [customCancelReason, setCustomCancelReason] = useState<string>('');
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   // Buscar pedido en AppContext por ID o por orderNumber (ej: "DD-1042")
   const contextOrder = orders.find(
@@ -159,12 +160,13 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
         ? customCancelReason.trim() || 'Cancelado por el cliente'
         : cancelReason + (customCancelReason.trim() ? ` (${customCancelReason.trim()})` : '');
 
+    setCancelError(null);
     setIsCancelling(true);
     try {
       await cancelOrderByCustomer(order.id, finalReason);
       setIsCancelModalOpen(false);
     } catch (err: any) {
-      alert(err?.message || 'Error al cancelar el pedido.');
+      setCancelError(err?.message || 'Error al cancelar el pedido.');
     } finally {
       setIsCancelling(false);
     }
@@ -578,6 +580,13 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
                     placeholder="Describe brevemente el motivo..."
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
+                )}
+
+                {cancelError && (
+                  <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                    <span className="font-semibold leading-tight">{cancelError}</span>
+                  </div>
                 )}
 
                 <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">

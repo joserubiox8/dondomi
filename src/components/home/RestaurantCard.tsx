@@ -54,12 +54,6 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
                 Cerrado
               </span>
             )}
-
-            {restaurant.featured && (
-              <span className="bg-amber-500 text-slate-900 text-[10px] font-extrabold uppercase tracking-wide px-2 py-1 rounded-full shadow-sm">
-                ★ Destacado
-              </span>
-            )}
           </div>
 
           {/* Barrio Pill (muestra ubicación sin sesgo de calificaciones) */}

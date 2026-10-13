@@ -170,11 +170,17 @@ export default function AdminPage() {
     setIsCategoryModalOpen(false);
   };
 
+  const [categoryToDelete, setCategoryToDelete] = useState<{ id: string; name: string } | null>(null);
+
   const handleDeleteCategory = (catId: string, name: string) => {
-    if (window.confirm(`¿Deseas eliminar la categoría "${name}" de la pantalla principal?`)) {
-      deleteCategory(catId);
-      showNotice(`🗑️ Categoría "${name}" eliminada`);
-    }
+    setCategoryToDelete({ id: catId, name });
+  };
+
+  const handleConfirmDeleteCategory = () => {
+    if (!categoryToDelete) return;
+    deleteCategory(categoryToDelete.id);
+    showNotice(`🗑️ Categoría "${categoryToDelete.name}" eliminada`);
+    setCategoryToDelete(null);
   };
 
   // ==============================================================
@@ -189,11 +195,13 @@ export default function AdminPage() {
   const [newRestHours, setNewRestHours] = useState('11:00 AM - 10:00 PM');
   const [newRestCommission, setNewRestCommission] = useState(0);
   const [newRestPin, setNewRestPin] = useState('1234');
+  const [restFormError, setRestFormError] = useState<string | null>(null);
 
   const handleAddRestaurant = async (e: React.FormEvent) => {
     e.preventDefault();
+    setRestFormError(null);
     if (!newRestName.trim() || !newRestPhone.trim()) {
-      alert('Completa el nombre y teléfono del restaurante.');
+      setRestFormError('Completa el nombre y teléfono del restaurante.');
       return;
     }
 
@@ -244,11 +252,17 @@ export default function AdminPage() {
   const [newDriverPhone, setNewDriverPhone] = useState('');
   const [newDriverPlate, setNewDriverPlate] = useState('');
   const [newDriverEmail, setNewDriverEmail] = useState('');
+  const [driverFormError, setDriverFormError] = useState<string | null>(null);
+
+  // Modal para cancelación administrativa forzosa sin prompt
+  const [adminCancellingOrder, setAdminCancellingOrder] = useState<Order | null>(null);
+  const [adminCancelReason, setAdminCancelReason] = useState<string>('Intervención de soporte administrativo');
 
   const handleAddDriver = (e: React.FormEvent) => {
     e.preventDefault();
+    setDriverFormError(null);
     if (!newDriverName.trim() || !newDriverPhone.trim()) {
-      alert('Completa el nombre y teléfono del domiciliario.');
+      setDriverFormError('Completa el nombre y teléfono del domiciliario.');
       return;
     }
 
@@ -790,11 +804,8 @@ export default function AdminPage() {
                         {o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && (
                           <button
                             onClick={() => {
-                              const reason = window.prompt(`Motivo de cancelación forzosa del pedido ${o.orderNumber}:`, 'Intervención de soporte administrativo');
-                              if (reason !== null) {
-                                updateOrderStatus(o.id, 'CANCELLED', reason || 'Intervención por Administración', 'ADMINISTRADOR');
-                                showNotice(`Pedido ${o.orderNumber} cancelado forzosamente`);
-                              }
+                              setAdminCancellingOrder(o);
+                              setAdminCancelReason('Intervención de soporte administrativo');
                             }}
                             className="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold px-2.5 py-1.5 rounded-xl border border-red-200 cursor-pointer"
                             title="Cancelar pedido de emergencia"
@@ -997,6 +1008,13 @@ export default function AdminPage() {
             </div>
 
             <form onSubmit={handleAddRestaurant} className="space-y-3">
+              {restFormError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                  <span className="font-bold">{restFormError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre del Restaurante</label>
                 <input
@@ -1095,6 +1113,13 @@ export default function AdminPage() {
             </div>
 
             <form onSubmit={handleAddDriver} className="space-y-3">
+              {driverFormError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                  <span className="font-bold">{driverFormError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre Completo</label>
                 <input
@@ -1134,18 +1159,124 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={() => setIsAddDriverModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md"
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md cursor-pointer"
                 >
                   Registrar
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CONFIRMAR ELIMINACIÓN DE CATEGORÍA */}
+      {/* ============================================================== */}
+      {categoryToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-slate-100 text-slate-800 space-y-4 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto text-xl font-bold">
+              🗑️
+            </div>
+            <div className="text-center">
+              <h4 className="font-black text-slate-900 text-base">¿Eliminar categoría?</h4>
+              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                ¿Deseas retirar permanentemente la categoría <strong>&quot;{categoryToDelete.name}&quot;</strong> de la pantalla principal de DonDomi?
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCategoryToDelete(null)}
+                className="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCategory}
+                className="py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-md shadow-red-600/25 transition cursor-pointer"
+              >
+                Sí, eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CANCELACIÓN FORZOSA ADMINISTRATIVA */}
+      {/* ============================================================== */}
+      {adminCancellingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-slate-100 text-slate-800 space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold text-xs">
+                  ⚠️
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm">
+                    Intervención Administrativa
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Cancelación de emergencia para orden #{adminCancellingOrder.orderNumber}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAdminCancellingOrder(null)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Ingresa el motivo que se registrará en la auditoría del pedido y se notificará al cliente y restaurante:
+              </p>
+              <textarea
+                rows={3}
+                required
+                value={adminCancelReason}
+                onChange={(e) => setAdminCancelReason(e.target.value)}
+                placeholder="Describe el motivo de la intervención..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 font-medium"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setAdminCancellingOrder(null)}
+                className="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Mantener orden
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  updateOrderStatus(
+                    adminCancellingOrder.id,
+                    'CANCELLED',
+                    adminCancelReason.trim() || 'Intervención administrativa de emergencia',
+                    'ADMINISTRADOR'
+                  );
+                  showNotice(`Pedido ${adminCancellingOrder.orderNumber} cancelado forzosamente`);
+                  setAdminCancellingOrder(null);
+                }}
+                className="py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-md shadow-red-600/25 transition cursor-pointer"
+              >
+                Confirmar Cancelación
+              </button>
+            </div>
           </div>
         </div>
       )}

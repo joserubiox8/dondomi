@@ -62,6 +62,7 @@ export function dbToRestaurant(data: any): Restaurant {
     acceptsCard: data.accepts_card ?? false,
     featured: data.featured ?? false,
     pin: data.pin || '1234',
+    email: data.email || RESTAURANTS.find((ir) => ir.id === data.id)?.email || '',
   };
 }
 

@@ -79,6 +79,8 @@ export default function MerchantPage() {
   const [prodCategory, setProdCategory] = useState('');
   const [prodImageUrl, setProdImageUrl] = useState('');
   const [prodIsPopular, setProdIsPopular] = useState(false);
+  const [productFormError, setProductFormError] = useState<string | null>(null);
+  const [productToDelete, setProductToDelete] = useState<{ id: string; name: string } | null>(null);
 
   // Notificación flotante de éxito
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
@@ -108,7 +110,7 @@ export default function MerchantPage() {
       showNotice(`❌ Pedido ${rejectingOrder.orderNumber} rechazado`);
       setRejectingOrder(null);
     } catch (err: any) {
-      alert(err?.message || 'Error al rechazar el pedido');
+      showNotice(`❌ ${err?.message || 'Error al rechazar el pedido'}`);
     } finally {
       setIsSubmittingReject(false);
     }
@@ -222,6 +224,7 @@ export default function MerchantPage() {
 
   // Manejo de Modal de Platos
   const handleOpenAddProduct = () => {
+    setProductFormError(null);
     setEditingProduct(null);
     setProdName('');
     setProdDescription('');
@@ -233,6 +236,7 @@ export default function MerchantPage() {
   };
 
   const handleOpenEditProduct = (prod: Product) => {
+    setProductFormError(null);
     setEditingProduct(prod);
     setProdName(prod.name);
     setProdDescription(prod.description);
@@ -245,8 +249,9 @@ export default function MerchantPage() {
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setProductFormError(null);
     if (!prodName.trim() || !prodCategory.trim() || prodPrice <= 0) {
-      alert('Completa los campos obligatorios del plato.');
+      setProductFormError('Completa los campos obligatorios del plato (Nombre, Categoría y Precio válido).');
       return;
     }
 
@@ -281,11 +286,15 @@ export default function MerchantPage() {
     setIsProductModalOpen(false);
   };
 
-  const handleDeleteProduct = async (prodId: string, name: string) => {
-    if (window.confirm(`¿Estás seguro de eliminar el plato "${name}" de tu carta?`)) {
-      await deleteProduct(restaurant.id, prodId);
-      showNotice(`🗑️ Plato eliminado de la carta`);
-    }
+  const handleDeleteProduct = (prodId: string, name: string) => {
+    setProductToDelete({ id: prodId, name });
+  };
+
+  const handleConfirmDeleteProduct = async () => {
+    if (!productToDelete) return;
+    await deleteProduct(restaurant.id, productToDelete.id);
+    showNotice(`🗑️ Plato "${productToDelete.name}" eliminado de la carta`);
+    setProductToDelete(null);
   };
 
   // Métricas financieras del restaurante
@@ -1053,6 +1062,13 @@ export default function MerchantPage() {
             </div>
 
             <form onSubmit={handleSaveProduct} className="space-y-3.5">
+              {productFormError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                  <span className="font-bold leading-tight">{productFormError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre del Plato</label>
                 <input
@@ -1120,25 +1136,60 @@ export default function MerchantPage() {
                   onChange={(e) => setProdIsPopular(e.target.checked)}
                   className="accent-orange-600 rounded"
                 />
-                <span>Marcar como Plato Más Vendido / Destacado</span>
+                <span>Marcar como Plato Más Vendido / Recomendado</span>
               </label>
 
               <div className="pt-2 flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsProductModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md"
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md cursor-pointer"
                 >
                   Guardar Plato
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CONFIRMAR ELIMINACIÓN DE PLATO */}
+      {/* ============================================================== */}
+      {productToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-slate-100 text-slate-800 space-y-4 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto text-xl font-bold">
+              🗑️
+            </div>
+            <div className="text-center">
+              <h4 className="font-black text-slate-900 text-base">¿Eliminar plato de tu carta?</h4>
+              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                ¿Estás seguro de que deseas eliminar permanentemente <strong>&quot;{productToDelete.name}&quot;</strong>? Los clientes ya no podrán pedirlo en DonDomi.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setProductToDelete(null)}
+                className="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteProduct}
+                className="py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-md shadow-red-600/25 transition cursor-pointer"
+              >
+                Sí, eliminar
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -57,6 +57,32 @@ export default function LoginPage() {
     setErrorMessage(null);
   };
 
+  const handleDirectDemoLogin = async (demoEmail: string, demoPass: string) => {
+    setEmail(demoEmail);
+    setPassword(demoPass);
+    setErrorMessage(null);
+    setIsLoading(true);
+
+    try {
+      const res = await loginWithEmail(demoEmail, demoPass);
+      if (res.success) {
+        if (res.role === 'ADMINISTRADOR') {
+          router.push('/admin');
+        } else if (res.role === 'RESTAURANTE') {
+          router.push('/merchant');
+        } else if (res.role === 'DOMICILIARIO') {
+          router.push('/driver');
+        } else {
+          router.push('/');
+        }
+      } else {
+        setErrorMessage(res.error || 'Credenciales inválidas.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-between p-4 sm:p-6 selection:bg-orange-600 selection:text-white">
       {/* Top Header */}
@@ -204,38 +230,46 @@ export default function LoginPage() {
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
                     type="button"
-                    onClick={() => handleQuickFill('admin@dondomi.com', 'admin2026')}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition"
+                    disabled={isLoading}
+                    onClick={() => handleDirectDemoLogin('admin@dondomi.com', 'admin2026')}
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer disabled:opacity-50"
                   >
                     <span className="text-[10px] font-bold text-orange-400 block">🛡️ Administrador</span>
                     <span className="text-[11px] text-white font-mono block">admin@dondomi.com</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5 block">Entrar con 1 clic →</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => handleQuickFill('elvalle@dondomi.com', 'cocina1234')}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition"
+                    disabled={isLoading}
+                    onClick={() => handleDirectDemoLogin('elvalle@dondomi.com', 'cocina1234')}
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer disabled:opacity-50"
                   >
                     <span className="text-[10px] font-bold text-amber-400 block">🍳 Pollos El Valle</span>
                     <span className="text-[11px] text-white font-mono block">elvalle@dondomi.com</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5 block">Entrar con 1 clic →</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => handleQuickFill('pedro@dondomi.com', 'cocina1234')}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition"
+                    disabled={isLoading}
+                    onClick={() => handleDirectDemoLogin('pedro@dondomi.com', 'cocina1234')}
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer disabled:opacity-50"
                   >
                     <span className="text-[10px] font-bold text-amber-400 block">🍳 Asador de Pedro</span>
                     <span className="text-[11px] text-white font-mono block">pedro@dondomi.com</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5 block">Entrar con 1 clic →</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => handleQuickFill('javier@dondomi.com', 'domi1234')}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition"
+                    disabled={isLoading}
+                    onClick={() => handleDirectDemoLogin('javier@dondomi.com', 'domi1234')}
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer disabled:opacity-50"
                   >
                     <span className="text-[10px] font-bold text-blue-400 block">🛵 Domiciliario</span>
                     <span className="text-[11px] text-white font-mono block">javier@dondomi.com</span>
+                    <span className="text-[9px] text-slate-400 mt-0.5 block">Entrar con 1 clic →</span>
                   </button>
                 </div>
               </div>

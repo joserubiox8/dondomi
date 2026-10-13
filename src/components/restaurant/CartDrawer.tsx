@@ -52,6 +52,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const [orderNotes, setOrderNotes] = useState<string>('');
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [checkoutStage, setCheckoutStage] = useState<'IDLE' | 'SENDING' | 'CONFIRMED'>('IDLE');
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -65,8 +66,15 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     e.preventDefault();
     setCheckoutError(null);
 
+    const cleanPhone = customerPhone.replace(/\D/g, '');
+
     if (!customerName.trim() || !customerPhone.trim() || !deliveryNeighborhood.trim() || !deliveryStreet.trim()) {
       setCheckoutError('Por favor completa tu nombre, celular, barrio y dirección exacta para la entrega.');
+      return;
+    }
+
+    if (cleanPhone.length !== 10) {
+      setCheckoutError('El número de celular o WhatsApp debe tener exactamente 10 dígitos (Ej: 300 123 4567).');
       return;
     }
 
@@ -103,7 +111,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       orderNumber,
       customerId: `cust-${Date.now()}`,
       customerName: customerName.trim(),
-      customerPhone: customerPhone.trim(),
+      customerPhone: cleanPhone,
       restaurantId: cartRestaurantId || 'rest-1',
       restaurantName: cartRestaurantName || 'Restaurante',
       status: 'PENDING',
@@ -128,16 +136,40 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     };
 
     setIsSubmitting(true);
-    try {
-      await addOrder(newOrder);
-      setPlacedOrder(newOrder);
+    setCheckoutStage('SENDING');
 
-      // Recordar el pedido en el dispositivo del cliente para persistencia
+    try {
+      // Garantizar al menos 1.5s de animación visible de envío
+      const minAnimationTimer = new Promise((resolve) => setTimeout(resolve, 1500));
+      await Promise.all([addOrder(newOrder), minAnimationTimer]);
+
+      // Guardar lista de múltiples pedidos activos concurrentes en localStorage
       if (typeof window !== 'undefined') {
+        let activeOrders: string[] = [];
+        try {
+          const stored = localStorage.getItem('dondomi_active_orders');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) activeOrders = parsed;
+          }
+        } catch {}
+
+        if (!activeOrders.includes(newOrder.orderNumber)) {
+          activeOrders.unshift(newOrder.orderNumber);
+        }
+        localStorage.setItem('dondomi_active_orders', JSON.stringify(activeOrders));
         localStorage.setItem('dondomi_active_order', newOrder.orderNumber);
         localStorage.setItem('dondomi_active_order_time', Date.now().toString());
       }
+
+      // Animación de éxito confirmada
+      setCheckoutStage('CONFIRMED');
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+
+      setPlacedOrder(newOrder);
+      setCheckoutStage('IDLE');
     } catch (err: any) {
+      setCheckoutStage('IDLE');
       console.error('Error durante el checkout:', err);
       setCheckoutError(err?.message || 'Hubo un error registrando tu pedido. Por favor verifica tu conexión y vuelve a intentar.');
     } finally {
@@ -207,7 +239,49 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
           </button>
         </div>
 
-        {placedOrder ? (
+        {checkoutStage === 'SENDING' ? (
+          // Animación de envío en progreso
+          <div className="p-8 sm:p-12 text-center flex flex-col items-center justify-center space-y-6 flex-1 min-h-[380px] animate-in fade-in">
+            <div className="relative w-24 h-24 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-orange-500/20 animate-ping" />
+              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-orange-600 to-red-500 text-white flex items-center justify-center shadow-xl shadow-orange-500/30">
+                <Bike className="w-10 h-10 animate-bounce" />
+              </div>
+            </div>
+            <div className="space-y-2 max-w-xs mx-auto">
+              <span className="text-[11px] font-black uppercase tracking-wider text-orange-600 bg-orange-50 px-3 py-1 rounded-full border border-orange-200">
+                Transmitiendo Pedido
+              </span>
+              <h4 className="text-xl font-black text-slate-900 tracking-tight">
+                Enviando tu pedido a la cocina...
+              </h4>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Conectando en tiempo real con <strong>{cartRestaurantName || 'el restaurante'}</strong> en Valledupar. Por favor no cierres la pantalla.
+              </p>
+            </div>
+            <div className="w-48 bg-slate-100 rounded-full h-2 overflow-hidden shadow-inner">
+              <div className="h-full bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 rounded-full animate-pulse w-3/4" />
+            </div>
+          </div>
+        ) : checkoutStage === 'CONFIRMED' ? (
+          // Animación de pedido confirmado
+          <div className="p-8 sm:p-12 text-center flex flex-col items-center justify-center space-y-5 flex-1 min-h-[380px] animate-in zoom-in-95 duration-300">
+            <div className="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-xl shadow-emerald-500/20 animate-bounce">
+              <CheckCircle2 className="w-12 h-12" />
+            </div>
+            <div className="space-y-1.5 max-w-xs mx-auto">
+              <span className="text-[11px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                ¡Recibido con Éxito!
+              </span>
+              <h4 className="text-xl font-black text-slate-900 tracking-tight">
+                ¡Pedido confirmado con éxito!
+              </h4>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Tu orden fue recibida por la cocina. Generando pase de rastreo en vivo...
+              </p>
+            </div>
+          </div>
+        ) : placedOrder ? (
           // Vista de confirmación con botón directo a WhatsApp
           <div className="p-6 text-center space-y-4 overflow-y-auto">
             <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
@@ -352,16 +426,22 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                   </div>
 
                   <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Teléfono celular / WhatsApp
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-700">
+                        Teléfono celular / WhatsApp <span className="text-red-500">*</span>
+                      </label>
+                      <span className={`text-[10px] font-bold ${customerPhone.length === 10 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                        {customerPhone.length}/10 dígitos
+                      </span>
+                    </div>
                     <input
                       type="tel"
                       required
-                      placeholder="Ej: 300 123 4567"
+                      maxLength={10}
+                      placeholder="Ej: 3001234567"
                       value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                      onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 font-mono text-sm"
                     />
                   </div>
 

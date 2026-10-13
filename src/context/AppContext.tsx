@@ -147,9 +147,66 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [currentNeighborhood, setCurrentNeighborhood] = useState<string>('Los Cortijos');
   const [isLocationModalOpen, setIsLocationModalOpen] = useState<boolean>(false);
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [cartRestaurantId, setCartRestaurantId] = useState<string | null>(null);
-  const [cartRestaurantName, setCartRestaurantName] = useState<string | null>(null);
+
+  // Carrito persistente con tiempo de espera de 2 horas
+  const CART_STORAGE_KEY = 'dondomi_cart_v1';
+  const CART_EXPIRATION_MS = 2 * 60 * 60 * 1000; // 2 horas
+
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(CART_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const age = Date.now() - (parsed.timestamp || 0);
+          if (age < CART_EXPIRATION_MS && Array.isArray(parsed.cart)) {
+            return parsed.cart;
+          } else {
+            localStorage.removeItem(CART_STORAGE_KEY);
+          }
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+
+  const [cartRestaurantId, setCartRestaurantId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(CART_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const age = Date.now() - (parsed.timestamp || 0);
+          if (age < CART_EXPIRATION_MS) return parsed.cartRestaurantId || null;
+        }
+      } catch (e) {}
+    }
+    return null;
+  });
+
+  const [cartRestaurantName, setCartRestaurantName] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(CART_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          const age = Date.now() - (parsed.timestamp || 0);
+          if (age < CART_EXPIRATION_MS) return parsed.cartRestaurantName || null;
+        }
+      } catch (e) {}
+    }
+    return null;
+  });
+
+  // Estado para cambio de restaurante en canasta sin alert/confirm
+  const [pendingCartSwitch, setPendingCartSwitch] = useState<{
+    product: Product;
+    restaurantName: string;
+    quantity: number;
+    selectedOptions: SelectedOption[];
+    notes: string;
+  } | null>(null);
+
   const [activeRole, setActiveRole] = useState<UserRole>('CLIENTE');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategorySlug, setSelectedCategorySlug] = useState<string | null>(null);
@@ -867,13 +924,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { success: true, role: 'ADMINISTRADOR' };
     }
 
-    // 2. Detección Restaurante (por email registrado o por nombre/slug)
-    const foundRest = restaurants.find(
-      (r) =>
-        (r.email && r.email.toLowerCase() === cleanEmail) ||
-        r.name.toLowerCase().replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail ||
-        r.slug.replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail
-    );
+    // Aliases conocidos para pruebas rápidas y accesos directos
+    const RESTAURANT_ALIASES: Record<string, string> = {
+      'elvalle@dondomi.com': 'rest-1',
+      'polloselvalle@dondomi.com': 'rest-1',
+      'guatapuri@dondomi.com': 'rest-2',
+      'pedro@dondomi.com': 'rest-3',
+      'elasadordepedro@dondomi.com': 'rest-3',
+      'lasirena@dondomi.com': 'rest-4',
+      'caciqueupar@dondomi.com': 'rest-5',
+      'donchalo@dondomi.com': 'rest-chalo',
+    };
+
+    const DRIVER_ALIASES: Record<string, string> = {
+      'javier@dondomi.com': 'drv-1',
+      'carlos@dondomi.com': 'drv-2',
+    };
+
+    // 2. Detección Restaurante (por alias directo, por email registrado o por nombre/slug)
+    const targetRestId = RESTAURANT_ALIASES[cleanEmail];
+    const foundRest = targetRestId
+      ? restaurants.find((r) => r.id === targetRestId) || INITIAL_RESTAURANTS.find((r) => r.id === targetRestId)
+      : restaurants.find(
+          (r) =>
+            (r.email && r.email.toLowerCase() === cleanEmail) ||
+            r.name.toLowerCase().replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail ||
+            r.slug.replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail
+        );
 
     if (foundRest) {
       const expectedPin = foundRest.pin || '1234';
@@ -898,13 +975,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { success: true, role: 'RESTAURANTE' };
     }
 
-    // 3. Detección Domiciliario (por email o por teléfono)
-    const foundDriver = drivers.find(
-      (d) =>
-        d.email.toLowerCase() === cleanEmail ||
-        d.phone.replace(/\D/g, '') === cleanEmail.replace(/\D/g, '') ||
-        d.name.toLowerCase().replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail
-    );
+    // 3. Detección Domiciliario (por alias directo, email o por teléfono)
+    const targetDriverId = DRIVER_ALIASES[cleanEmail];
+    const foundDriver = targetDriverId
+      ? drivers.find((d) => d.id === targetDriverId) || INITIAL_DRIVERS.find((d) => d.id === targetDriverId)
+      : drivers.find(
+          (d) =>
+            d.email.toLowerCase() === cleanEmail ||
+            d.phone.replace(/\D/g, '') === cleanEmail.replace(/\D/g, '') ||
+            d.name.toLowerCase().replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail
+        );
 
     if (foundDriver) {
       if (cleanPass !== 'domi1234' && cleanPass !== '1234') {
@@ -1028,21 +1108,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
   const cartSubtotal = cart.reduce((acc, item) => acc + item.itemTotal, 0);
 
-  const addToCart = (
+  const saveCartToStorage = (newCart: CartItem[], restId: string | null, restName: string | null) => {
+    if (typeof window !== 'undefined') {
+      if (newCart.length === 0) {
+        localStorage.removeItem(CART_STORAGE_KEY);
+      } else {
+        localStorage.setItem(
+          CART_STORAGE_KEY,
+          JSON.stringify({
+            cart: newCart,
+            cartRestaurantId: restId,
+            cartRestaurantName: restName,
+            timestamp: Date.now(),
+          })
+        );
+      }
+    }
+  };
+
+  const executeAddToCart = (
     product: Product,
     restaurantName: string,
     quantity: number,
     selectedOptions: SelectedOption[] = [],
     notes: string = ''
   ) => {
-    if (cartRestaurantId && cartRestaurantId !== product.restaurantId && cart.length > 0) {
-      const confirmChange = window.confirm(
-        `Tu carrito tiene productos de "${cartRestaurantName}". ¿Deseas vaciarlo para agregar de este nuevo restaurante?`
-      );
-      if (!confirmChange) return;
-      setCart([]);
-    }
-
     setCartRestaurantId(product.restaurantId);
     setCartRestaurantName(restaurantName);
 
@@ -1059,16 +1149,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       itemTotal,
     };
 
-    setCart((prev) => [...prev, newItem]);
+    setCart((prev) => {
+      const updated = [...prev, newItem];
+      saveCartToStorage(updated, product.restaurantId, restaurantName);
+      return updated;
+    });
+  };
+
+  const addToCart = (
+    product: Product,
+    restaurantName: string,
+    quantity: number,
+    selectedOptions: SelectedOption[] = [],
+    notes: string = ''
+  ) => {
+    if (cartRestaurantId && cartRestaurantId !== product.restaurantId && cart.length > 0) {
+      setPendingCartSwitch({
+        product,
+        restaurantName,
+        quantity,
+        selectedOptions,
+        notes,
+      });
+      return;
+    }
+
+    executeAddToCart(product, restaurantName, quantity, selectedOptions, notes);
   };
 
   const removeFromCart = (cartItemId: string) => {
     setCart((prev) => {
       const updated = prev.filter((item) => item.id !== cartItemId);
+      const nextRestId = updated.length === 0 ? null : cartRestaurantId;
+      const nextRestName = updated.length === 0 ? null : cartRestaurantName;
       if (updated.length === 0) {
         setCartRestaurantId(null);
         setCartRestaurantName(null);
       }
+      saveCartToStorage(updated, nextRestId, nextRestName);
       return updated;
     });
   };
@@ -1078,8 +1196,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       removeFromCart(cartItemId);
       return;
     }
-    setCart((prev) =>
-      prev.map((item) => {
+    setCart((prev) => {
+      const updated = prev.map((item) => {
         if (item.id === cartItemId) {
           const optionsTotal = (item.selectedOptions || []).reduce((acc, opt) => acc + opt.price, 0);
           const unitPriceWithOptions = item.product.price + optionsTotal;
@@ -1090,14 +1208,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           };
         }
         return item;
-      })
-    );
+      });
+      saveCartToStorage(updated, cartRestaurantId, cartRestaurantName);
+      return updated;
+    });
   };
 
   const clearCart = () => {
     setCart([]);
     setCartRestaurantId(null);
     setCartRestaurantName(null);
+    saveCartToStorage([], null, null);
   };
 
   return (
@@ -1160,6 +1281,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+
+      {/* Modal DonDomi de confirmación para cambiar de restaurante en la canasta */}
+      {pendingCartSwitch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-slate-100 text-slate-800 space-y-4 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto text-xl font-bold">
+              ⚠️
+            </div>
+            <div className="text-center">
+              <h4 className="font-black text-slate-900 text-base">¿Cambiar de restaurante?</h4>
+              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                Tu canasta tiene platos de <strong>&quot;{cartRestaurantName}&quot;</strong>. Si agregas platos de{' '}
+                <strong>&quot;{pendingCartSwitch.restaurantName}&quot;</strong>, se vaciará tu canasta anterior.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingCartSwitch(null)}
+                className="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Conservar actual
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const pending = pendingCartSwitch;
+                  setPendingCartSwitch(null);
+                  setCart([]);
+                  setCartRestaurantId(null);
+                  setCartRestaurantName(null);
+                  saveCartToStorage([], null, null);
+                  executeAddToCart(
+                    pending.product,
+                    pending.restaurantName,
+                    pending.quantity,
+                    pending.selectedOptions,
+                    pending.notes
+                  );
+                }}
+                className="py-2.5 px-3 rounded-2xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-md shadow-orange-600/25 transition cursor-pointer"
+              >
+                Sí, cambiar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppContext.Provider>
   );
 }

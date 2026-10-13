@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Plus, Minus, Check } from 'lucide-react';
+import { X, Plus, Minus, Check, AlertCircle } from 'lucide-react';
 import { Product, SelectedOption, ProductOptionItem } from '@/types';
 import { formatCOP } from '@/lib/utils';
 import { useApp } from '@/context/AppContext';
@@ -24,6 +24,7 @@ export default function ProductModal({
   const [selectedRadioOptions, setSelectedRadioOptions] = useState<Record<string, ProductOptionItem>>({});
   const [selectedCheckboxOptions, setSelectedCheckboxOptions] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState<string>('');
+  const [modalError, setModalError] = useState<string | null>(null);
 
   if (!product) return null;
 
@@ -51,8 +52,9 @@ export default function ProductModal({
   const canAdd = isAvailable && isRestaurantOpen;
 
   const handleAdd = () => {
+    setModalError(null);
     if (!canAdd) {
-      alert(!isAvailable ? 'Este plato está agotado por hoy.' : 'El restaurante se encuentra cerrado en este momento.');
+      setModalError(!isAvailable ? 'Este plato está agotado por hoy en cocina.' : 'El restaurante se encuentra cerrado en este momento.');
       return;
     }
 
@@ -60,7 +62,7 @@ export default function ProductModal({
     if (product.options) {
       for (const group of product.options) {
         if (group.required && !selectedRadioOptions[group.id]) {
-          alert(`Por favor selecciona una opción en "${group.name}"`);
+          setModalError(`Por favor selecciona una opción en "${group.name}".`);
           return;
         }
       }
@@ -235,6 +237,14 @@ export default function ProductModal({
             />
           </div>
         </div>
+
+        {/* Mensaje de validación dentro de la app DonDomi */}
+        {modalError && (
+          <div className="mx-4 my-2 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-2xl flex items-center gap-2.5 animate-in fade-in">
+            <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <span className="font-bold leading-tight">{modalError}</span>
+          </div>
+        )}
 
         {/* Bottom action bar */}
         <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center gap-3">

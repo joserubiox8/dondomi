@@ -4,7 +4,7 @@ import React, { useMemo } from 'react';
 import { FOOD_CATEGORIES } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import RestaurantCard from './RestaurantCard';
-import { Store, Flame, UtensilsCrossed } from 'lucide-react';
+import { Store, UtensilsCrossed } from 'lucide-react';
 
 export default function RestaurantList() {
   const { searchQuery, selectedCategorySlug, onlyOpenFilter, restaurants } = useApp();
@@ -45,35 +45,8 @@ export default function RestaurantList() {
     });
   }, [searchQuery, selectedCategorySlug, onlyOpenFilter, activeCategory]);
 
-  const featuredRestaurants = useMemo(() => {
-    return filteredRestaurants.filter((r) => r.featured);
-  }, [filteredRestaurants]);
-
   return (
     <div className="space-y-6">
-      {/* Sección: Restaurantes Destacados (solo si no hay búsqueda activa que restrinja mucho) */}
-      {!searchQuery && !selectedCategorySlug && featuredRestaurants.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center">
-                <Flame className="w-3.5 h-3.5 text-amber-600" />
-              </div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                Destacados en Valledupar
-              </h2>
-            </div>
-            <span className="text-xs text-slate-500 font-medium">Recomendados</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {featuredRestaurants.map((restaurant) => (
-              <RestaurantCard key={`featured-${restaurant.id}`} restaurant={restaurant} />
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* Sección principal: Lista completa */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">

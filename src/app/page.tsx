@@ -19,7 +19,7 @@ export default function HomePage() {
         {/* Carrusel de categorías de comida con indicador deslizante y Salchipapas */}
         <CategoryChips />
 
-        {/* Lista de restaurantes con filtros y destacados */}
+        {/* Lista imparcial de restaurantes disponibles */}
         <RestaurantList />
       </main>
     </div>

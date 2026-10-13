@@ -116,7 +116,8 @@ export default function DriverPage() {
       setIsIncidentModalOpen(false);
       setTimeout(() => setSuccessNotice(null), 5000);
     } catch (err: any) {
-      alert(err?.message || 'Error al liberar la carrera.');
+      setErrorNotice(err?.message || 'Error al liberar la carrera.');
+      setTimeout(() => setErrorNotice(null), 5000);
     } finally {
       setIsReleasing(false);
     }
@@ -276,7 +277,7 @@ export default function DriverPage() {
               </span>
             </div>
 
-            {/* Aviso Destacado de Cobro al Cliente */}
+            {/* Aviso de Cobro al Cliente */}
             {activeOrder.paymentMethod === 'EFECTIVO' ? (
               <div className="bg-amber-500/10 border-2 border-amber-500 rounded-2xl p-3.5 flex items-start gap-3">
                 <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center shrink-0 font-black text-sm">
