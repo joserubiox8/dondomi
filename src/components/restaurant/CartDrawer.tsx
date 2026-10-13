@@ -14,6 +14,8 @@ import {
   MapPin,
   User,
   Phone,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
@@ -36,6 +38,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     cartSubtotal,
     currentNeighborhood,
     restaurants,
+    productsByRestaurant,
     addOrder,
     globalDeliveryFee,
   } = useApp();
@@ -48,6 +51,8 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const [deliveryReference, setDeliveryReference] = useState<string>('');
   const [orderNotes, setOrderNotes] = useState<string>('');
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -56,12 +61,28 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const platformFee = 0; // $0 COP tarifa de servicio DonDomi
   const grandTotal = cartSubtotal + deliveryFee;
 
-  const handleCheckout = (e: React.FormEvent) => {
+  const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCheckoutError(null);
 
     if (!customerName.trim() || !customerPhone.trim() || !deliveryNeighborhood.trim() || !deliveryStreet.trim()) {
-      alert('Por favor completa tu nombre, celular, barrio y dirección exacta para la entrega.');
+      setCheckoutError('Por favor completa tu nombre, celular, barrio y dirección exacta para la entrega.');
       return;
+    }
+
+    if (currentRestaurant && currentRestaurant.isOpen === false) {
+      setCheckoutError('El restaurante se encuentra cerrado en este momento y no puede recibir pedidos.');
+      return;
+    }
+
+    // Verificar si algún producto de la canasta está marcado como agotado
+    const restaurantProducts = cartRestaurantId ? productsByRestaurant[cartRestaurantId] || [] : [];
+    for (const item of cart) {
+      const match = restaurantProducts.find((p) => p.id === item.product.id);
+      if (match && match.isAvailable === false) {
+        setCheckoutError(`El producto "${item.product.name}" se agotó en cocina. Elimínalo de tu canasta antes de continuar.`);
+        return;
+      }
     }
 
     const orderNumber = `DD-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -106,13 +127,21 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       estimatedDeliveryTime: '30–45 min',
     };
 
-    addOrder(newOrder);
-    setPlacedOrder(newOrder);
+    setIsSubmitting(true);
+    try {
+      await addOrder(newOrder);
+      setPlacedOrder(newOrder);
 
-    // Recordar el pedido en el dispositivo del cliente para persistencia
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('dondomi_active_order', newOrder.orderNumber);
-      localStorage.setItem('dondomi_active_order_time', Date.now().toString());
+      // Recordar el pedido en el dispositivo del cliente para persistencia
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_active_order', newOrder.orderNumber);
+        localStorage.setItem('dondomi_active_order_time', Date.now().toString());
+      }
+    } catch (err: any) {
+      console.error('Error durante el checkout:', err);
+      setCheckoutError(err?.message || 'Hubo un error registrando tu pedido. Por favor verifica tu conexión y vuelve a intentar.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -428,17 +457,41 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               </div>
             </div>
 
-            {/* Bottom Checkout Button */}
-            <div className="p-4 bg-slate-50 border-t border-slate-100">
+            {/* Bottom Checkout Button & Error Banner */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3">
+              {checkoutError && (
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-3 flex items-start gap-2.5 text-xs text-red-800 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-bold">No se pudo procesar el pedido</p>
+                    <p className="text-[11px] text-red-700 mt-0.5">{checkoutError}</p>
+                  </div>
+                </div>
+              )}
+
               <button
                 type="submit"
-                className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-orange-500/25 flex items-center justify-between active:scale-[0.98] transition cursor-pointer"
+                disabled={isSubmitting || (currentRestaurant && currentRestaurant.isOpen === false)}
+                className={`w-full text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg flex items-center justify-between transition ${
+                  isSubmitting || (currentRestaurant && currentRestaurant.isOpen === false)
+                    ? 'bg-slate-400 cursor-not-allowed opacity-80'
+                    : 'bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 shadow-orange-500/25 active:scale-[0.98] cursor-pointer'
+                }`}
               >
-                <span>Confirmar Pedido</span>
-                <div className="flex items-center gap-1">
-                  <span>{formatCOP(grandTotal)}</span>
-                  <ArrowRight className="w-4 h-4" />
-                </div>
+                {isSubmitting ? (
+                  <div className="flex items-center justify-center gap-2 w-full py-0.5">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Conectando con cocina...</span>
+                  </div>
+                ) : (
+                  <>
+                    <span>Confirmar Pedido</span>
+                    <div className="flex items-center gap-1">
+                      <span>{formatCOP(grandTotal)}</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </div>
+                  </>
+                )}
               </button>
             </div>
           </form>

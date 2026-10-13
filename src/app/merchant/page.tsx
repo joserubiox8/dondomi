@@ -46,6 +46,7 @@ export default function MerchantPage() {
     orders,
     productsByRestaurant,
     updateOrderStatus,
+    rejectOrder,
     toggleProductAvailability,
     addProduct,
     updateProduct,
@@ -63,6 +64,12 @@ export default function MerchantPage() {
   // Modal para ticket térmico de comanda
   const [ticketOrder, setTicketOrder] = useState<Order | null>(null);
 
+  // Modal para rechazar pedido
+  const [rejectingOrder, setRejectingOrder] = useState<Order | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>('Sin existencias / Ingredientes agotados');
+  const [customRejectReason, setCustomRejectReason] = useState<string>('');
+  const [isSubmittingReject, setIsSubmittingReject] = useState<boolean>(false);
+
   // Modales de plato (Crear / Editar)
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -79,6 +86,32 @@ export default function MerchantPage() {
   const showNotice = (msg: string) => {
     setNoticeMessage(msg);
     setTimeout(() => setNoticeMessage(null), 3500);
+  };
+
+  const handleOpenRejectModal = (order: Order) => {
+    setRejectingOrder(order);
+    setRejectReason('Sin existencias / Ingredientes agotados');
+    setCustomRejectReason('');
+  };
+
+  const handleConfirmReject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rejectingOrder) return;
+    const finalReason =
+      rejectReason === 'Otro motivo'
+        ? customRejectReason.trim() || 'Sin motivo especificado'
+        : rejectReason + (customRejectReason.trim() ? ` (${customRejectReason.trim()})` : '');
+
+    setIsSubmittingReject(true);
+    try {
+      await rejectOrder(rejectingOrder.id, finalReason);
+      showNotice(`❌ Pedido ${rejectingOrder.orderNumber} rechazado`);
+      setRejectingOrder(null);
+    } catch (err: any) {
+      alert(err?.message || 'Error al rechazar el pedido');
+    } finally {
+      setIsSubmittingReject(false);
+    }
   };
 
   // Determinar el restaurante del usuario activo
@@ -574,13 +607,22 @@ export default function MerchantPage() {
                         {/* Botones de cambio de estado en cocina */}
                         <div className="pt-1 flex flex-wrap items-center gap-2">
                           {isNew && (
-                            <button
-                              onClick={() => updateOrderStatus(order.id, 'PREPARING')}
-                              className="flex-1 bg-orange-600 hover:bg-orange-500 text-white font-black py-2.5 px-4 rounded-xl text-xs transition shadow-md flex items-center justify-center gap-2"
-                            >
-                              <ChefHat className="w-4 h-4" />
-                              <span>Aceptar Pedido e Iniciar Cocina</span>
-                            </button>
+                            <div className="flex-1 flex flex-wrap gap-2">
+                              <button
+                                onClick={() => updateOrderStatus(order.id, 'PREPARING')}
+                                className="flex-1 bg-orange-600 hover:bg-orange-500 text-white font-black py-2.5 px-4 rounded-xl text-xs transition shadow-md flex items-center justify-center gap-2"
+                              >
+                                <ChefHat className="w-4 h-4" />
+                                <span>Aceptar Pedido e Iniciar Cocina</span>
+                              </button>
+                              <button
+                                onClick={() => handleOpenRejectModal(order)}
+                                className="bg-red-50 hover:bg-red-100 text-red-700 font-extrabold py-2.5 px-3 rounded-xl text-xs transition border border-red-200 flex items-center justify-center gap-1.5"
+                              >
+                                <X className="w-4 h-4 text-red-600" />
+                                <span>Rechazar</span>
+                              </button>
+                            </div>
                           )}
 
                           {isPreparing && (
@@ -649,9 +691,18 @@ export default function MerchantPage() {
                           )}
 
                           {isCancelled && (
-                            <div className="text-xs font-bold text-red-700 flex items-center gap-1.5 bg-red-50 px-3 py-2 rounded-xl border border-red-200">
-                              <AlertCircle className="w-4 h-4 text-red-500" />
-                              <span>Pedido cancelado</span>
+                            <div className="w-full text-xs bg-red-50 p-3 rounded-2xl border border-red-200 space-y-1">
+                              <div className="flex items-center gap-1.5 font-bold text-red-700">
+                                <AlertCircle className="w-4 h-4 text-red-500" />
+                                <span>
+                                  Pedido Cancelado {order.cancelledBy ? `por ${order.cancelledBy}` : ''}
+                                </span>
+                              </div>
+                              {order.cancellationReason && (
+                                <p className="text-[11px] text-red-600 pl-5">
+                                  Motivo: &quot;{order.cancellationReason}&quot;
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1085,6 +1136,100 @@ export default function MerchantPage() {
                   className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md"
                 >
                   Guardar Plato
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: RECHAZAR PEDIDO CON MOTIVO */}
+      {/* ============================================================== */}
+      {rejectingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 border border-slate-200 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <h3 className="font-black text-sm text-slate-900">
+                  Rechazar Pedido #{rejectingOrder.orderNumber}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRejectingOrder(null)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Selecciona el motivo por el cual no es posible atender este pedido. Esta información se registrará y notificará al cliente:
+            </p>
+
+            <form onSubmit={handleConfirmReject} className="space-y-3">
+              <div className="space-y-2">
+                {[
+                  'Sin existencias / Ingredientes agotados',
+                  'Alta congestión / Cocina saturada',
+                  'Fuera de horario de atención',
+                  'Dirección fuera de cobertura de entrega',
+                  'Otro motivo',
+                ].map((reason) => (
+                  <label
+                    key={reason}
+                    className={`flex items-center gap-2.5 p-3 rounded-2xl border text-xs font-bold cursor-pointer transition ${
+                      rejectReason === reason
+                        ? 'border-red-500 bg-red-50 text-red-900'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="rejectReason"
+                      value={reason}
+                      checked={rejectReason === reason}
+                      onChange={() => setRejectReason(reason)}
+                      className="accent-red-600"
+                    />
+                    <span>{reason}</span>
+                  </label>
+                ))}
+              </div>
+
+              {rejectReason === 'Otro motivo' && (
+                <div className="pt-1">
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Describe el motivo para el cliente *
+                  </label>
+                  <textarea
+                    rows={2}
+                    required
+                    value={customRejectReason}
+                    onChange={(e) => setCustomRejectReason(e.target.value)}
+                    placeholder="Ej: Falla en suministro de gas, local cerrando..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isSubmittingReject}
+                  onClick={() => setRejectingOrder(null)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+                >
+                  Volver / No rechazar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingReject}
+                  className="px-5 py-2.5 rounded-xl text-xs font-extrabold bg-red-600 hover:bg-red-500 text-white shadow-md shadow-red-600/20 transition flex items-center gap-1.5"
+                >
+                  {isSubmittingReject ? 'Rechazando...' : 'Confirmar Rechazo'}
                 </button>
               </div>
             </form>

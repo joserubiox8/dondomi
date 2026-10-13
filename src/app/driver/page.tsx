@@ -17,6 +17,7 @@ import {
   LogOut,
   Store,
   User,
+  X,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
@@ -28,6 +29,7 @@ export default function DriverPage() {
     orders,
     restaurants,
     claimOrder,
+    unclaimOrder,
     updateOrderStatus,
     logout,
     loginAsDriver,
@@ -36,6 +38,11 @@ export default function DriverPage() {
 
   const [isAvailable, setIsAvailable] = useState<boolean>(true);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [errorNotice, setErrorNotice] = useState<string | null>(null);
+  const [isIncidentModalOpen, setIsIncidentModalOpen] = useState<boolean>(false);
+  const [incidentReason, setIncidentReason] = useState<string>('Avería o pinchazo en la motocicleta');
+  const [customIncidentReason, setCustomIncidentReason] = useState<string>('');
+  const [isReleasing, setIsReleasing] = useState<boolean>(false);
 
   const defaultFee = globalDeliveryFee || 7000;
   const driverId = currentUser?.role === 'DOMICILIARIO' ? currentUser.id : 'drv-demo';
@@ -83,9 +90,36 @@ export default function DriverPage() {
 
   const handleClaim = async (order: Order) => {
     playChime();
-    await claimOrder(order.id, driverName, currentUser?.phone || '3001234567');
-    setSuccessNotice(`¡Carrera #${order.orderNumber} aceptada! Dirígete al restaurante.`);
-    setTimeout(() => setSuccessNotice(null), 4000);
+    setErrorNotice(null);
+    const result = await claimOrder(order.id, driverName, currentUser?.phone || '3001234567');
+    if (result.success) {
+      setSuccessNotice(`¡Carrera #${order.orderNumber} aceptada! Dirígete al restaurante.`);
+      setTimeout(() => setSuccessNotice(null), 4000);
+    } else {
+      setErrorNotice(result.error || 'Esta carrera ya fue tomada por otro domiciliario.');
+      setTimeout(() => setErrorNotice(null), 5000);
+    }
+  };
+
+  const handleConfirmRelease = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeOrder) return;
+    const finalReason =
+      incidentReason === 'Otro percance'
+        ? customIncidentReason.trim() || 'Incidencia de ruta no especificada'
+        : incidentReason + (customIncidentReason.trim() ? ` (${customIncidentReason.trim()})` : '');
+
+    setIsReleasing(true);
+    try {
+      await unclaimOrder(activeOrder.id, finalReason);
+      setSuccessNotice(`Carrera #${activeOrder.orderNumber} liberada. El pedido volvió al radar para otros repartidores.`);
+      setIsIncidentModalOpen(false);
+      setTimeout(() => setSuccessNotice(null), 5000);
+    } catch (err: any) {
+      alert(err?.message || 'Error al liberar la carrera.');
+    } finally {
+      setIsReleasing(false);
+    }
   };
 
   const handleDeliver = async (orderId: string) => {
@@ -186,6 +220,14 @@ export default function DriverPage() {
           <div className="bg-emerald-600 text-white p-3 rounded-2xl text-xs font-bold shadow-md animate-in slide-in-from-top-2 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
             <span>{successNotice}</span>
+          </div>
+        )}
+
+        {/* Notificación de error / carrera ya tomada */}
+        {errorNotice && (
+          <div className="bg-red-600 text-white p-3 rounded-2xl text-xs font-bold shadow-md animate-in slide-in-from-top-2 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{errorNotice}</span>
           </div>
         )}
 
@@ -337,14 +379,25 @@ export default function DriverPage() {
               </a>
             </div>
 
-            {/* Confirmar entrega */}
-            <button
-              onClick={() => handleDeliver(activeOrder.id)}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 transition text-sm flex items-center justify-center gap-2"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Confirmar Entrega Realizada</span>
-            </button>
+            {/* Confirmar entrega o Liberar carrera */}
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={() => handleDeliver(activeOrder.id)}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 transition text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Confirmar Entrega Realizada</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsIncidentModalOpen(true)}
+                className="w-full bg-white hover:bg-amber-50 text-amber-700 font-bold py-2.5 rounded-xl border border-amber-300 transition text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                <span>Reportar Incidencia / Liberar Carrera</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -457,6 +510,93 @@ export default function DriverPage() {
                   </span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Reportar Incidencia / Liberar Carrera */}
+        {isIncidentModalOpen && activeOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 border border-slate-200 animate-in zoom-in-95">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2 text-amber-700">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 text-amber-600" />
+                  <h3 className="font-black text-sm text-slate-900">
+                    Liberar Carrera #{activeOrder.orderNumber}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsIncidentModalOpen(false)}
+                  className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600">
+                Al liberar la carrera, el pedido volverá a quedar disponible de inmediato para que otro domiciliario lo recoja. Selecciona el motivo del percance:
+              </p>
+
+              <form onSubmit={handleConfirmRelease} className="space-y-3">
+                <div className="space-y-2">
+                  {[
+                    'Avería o pinchazo en la motocicleta',
+                    'Emergencia médica o personal en la vía',
+                    'Lluvia torrencial / Vía intransitable',
+                    'Accidente de tránsito',
+                    'Otro percance',
+                  ].map((r) => (
+                    <label
+                      key={r}
+                      className={`flex items-center gap-2.5 p-2.5 rounded-2xl border text-xs font-bold cursor-pointer transition ${
+                        incidentReason === r
+                          ? 'border-amber-500 bg-amber-50 text-amber-950'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="incidentReasonOption"
+                        value={r}
+                        checked={incidentReason === r}
+                        onChange={() => setIncidentReason(r)}
+                        className="accent-amber-600"
+                      />
+                      <span>{r}</span>
+                    </label>
+                  ))}
+                </div>
+
+                {incidentReason === 'Otro percance' && (
+                  <textarea
+                    rows={2}
+                    required
+                    value={customIncidentReason}
+                    onChange={(e) => setCustomIncidentReason(e.target.value)}
+                    placeholder="Describe brevemente el percance..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                )}
+
+                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    disabled={isReleasing}
+                    onClick={() => setIsIncidentModalOpen(false)}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                  >
+                    Conservar carrera
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isReleasing}
+                    className="px-4 py-2 rounded-xl text-xs font-extrabold bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/20"
+                  >
+                    {isReleasing ? 'Liberando...' : 'Confirmar y Liberar'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

@@ -150,6 +150,9 @@ export interface Order {
   customerNotes?: string;
   createdAt: string;
   estimatedDeliveryTime?: string;
+  cancellationReason?: string;
+  cancelledBy?: 'CLIENTE' | 'RESTAURANTE' | 'SISTEMA' | 'ADMINISTRADOR';
+  incidentReason?: string;
 }
 
 export interface Driver {

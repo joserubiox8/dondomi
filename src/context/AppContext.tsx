@@ -15,6 +15,40 @@ export interface CartItem {
   itemTotal: number;
 }
 
+// Matriz de transiciones válidas para ciclo de vida de pedidos
+export const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  PENDING: ['PREPARING', 'CANCELLED'],
+  CONFIRMED: ['PREPARING', 'CANCELLED'],
+  PREPARING: ['READY_FOR_PICKUP', 'ON_THE_WAY', 'CANCELLED'],
+  READY_FOR_PICKUP: ['ON_THE_WAY', 'CANCELLED'],
+  ON_THE_WAY: ['DELIVERED', 'READY_FOR_PICKUP', 'CANCELLED'],
+  DELIVERED: [], // Terminal
+  CANCELLED: [], // Terminal
+};
+
+// Parser seguro de notas de cancelación e incidencias
+export function parseOrderNotes(notes?: string) {
+  if (!notes) return {};
+  const res: {
+    cancellationReason?: string;
+    cancelledBy?: 'CLIENTE' | 'RESTAURANTE' | 'SISTEMA' | 'ADMINISTRADOR';
+    incidentReason?: string;
+  } = {};
+  const cancelMatch = notes.match(
+    /\[Cancelado por (CLIENTE|RESTAURANTE|SISTEMA|ADMINISTRADOR):\s*([^\]]+)\]/i
+  );
+  if (cancelMatch) {
+    res.cancelledBy = cancelMatch[1].toUpperCase() as any;
+    res.cancellationReason = cancelMatch[2].trim();
+  } else {
+    const reasonMatch = notes.match(/\[(?:Motivo|Razón):\s*([^\]]+)\]/i);
+    if (reasonMatch) res.cancellationReason = reasonMatch[1].trim();
+  }
+  const incMatch = notes.match(/\[Incidencia Repartidor:\s*([^\]]+)\]/i);
+  if (incMatch) res.incidentReason = incMatch[1].trim();
+  return res;
+}
+
 interface AppContextType {
   // Autenticación Real de la Plataforma
   currentUser: User | null;
@@ -91,9 +125,21 @@ interface AppContextType {
 
   // Pedidos
   orders: Order[];
-  addOrder: (order: Order) => Promise<void>;
-  updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
-  claimOrder: (orderId: string, driverName: string, driverPhone?: string) => Promise<void>;
+  addOrder: (order: Order) => Promise<boolean>;
+  updateOrderStatus: (
+    orderId: string,
+    status: OrderStatus,
+    reason?: string,
+    cancelledBy?: 'CLIENTE' | 'RESTAURANTE' | 'SISTEMA' | 'ADMINISTRADOR'
+  ) => Promise<boolean>;
+  rejectOrder: (orderId: string, reason: string) => Promise<boolean>;
+  cancelOrderByCustomer: (orderId: string, reason?: string) => Promise<boolean>;
+  claimOrder: (
+    orderId: string,
+    driverName: string,
+    driverPhone?: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  unclaimOrder: (orderId: string, incidentReason: string) => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -254,15 +300,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             now - new Date(ord.createdAt).getTime() > PENDING_TIMEOUT_MS
           ) {
             hasChanges = true;
+            const updatedNote = ord.customerNotes
+              ? `${ord.customerNotes} | [Cancelado por SISTEMA: Tiempo de 15 min expirado sin confirmación]`
+              : `[Cancelado por SISTEMA: Tiempo de 15 min expirado sin confirmación]`;
+
             supabase
               .from('orders')
-              .update({ status: 'CANCELLED' })
+              .update({ status: 'CANCELLED', customer_notes: updatedNote })
               .eq('id', ord.id)
               .then(({ error }: { error: any }) => {
                 if (error) console.warn('Error auto-cancelando pedido:', error);
               });
 
-            return { ...ord, status: 'CANCELLED' as OrderStatus };
+            return {
+              ...ord,
+              status: 'CANCELLED' as OrderStatus,
+              cancellationReason: 'Tiempo reglamentario de 15 minutos expirado sin confirmación de la cocina',
+              cancelledBy: 'SISTEMA' as const,
+              customerNotes: updatedNote,
+            };
           }
           return ord;
         });
@@ -322,29 +378,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           .order('created_at', { ascending: false });
 
         if (!orderError && orderData && orderData.length > 0) {
-          const mappedOrders: Order[] = orderData.map((row: any) => ({
-            id: row.id,
-            orderNumber: row.order_number,
-            customerId: row.customer_name,
-            customerName: row.customer_name,
-            customerPhone: row.customer_phone,
-            restaurantId: row.restaurant_id || '',
-            restaurantName: row.restaurant_name,
-            driverId: row.driver_id,
-            driverName: row.driver_name,
-            status: row.status,
-            items: row.items || [],
-            subtotal: Number(row.subtotal),
-            deliveryFee: Number(row.delivery_fee),
-            serviceFee: Number(row.service_fee || 0),
-            total: Number(row.total),
-            paymentMethod: row.payment_method,
-            paymentStatus: row.payment_status,
-            deliveryAddress: row.delivery_address,
-            customerNotes: row.customer_notes,
-            estimatedDeliveryTime: row.estimated_delivery_time,
-            createdAt: row.created_at,
-          }));
+          const mappedOrders: Order[] = orderData.map((row: any) => {
+            const parsed = parseOrderNotes(row.customer_notes);
+            return {
+              id: row.id,
+              orderNumber: row.order_number,
+              customerId: row.customer_name,
+              customerName: row.customer_name,
+              customerPhone: row.customer_phone,
+              restaurantId: row.restaurant_id || '',
+              restaurantName: row.restaurant_name,
+              driverId: row.driver_id || undefined,
+              driverName: row.driver_name || undefined,
+              status: row.status,
+              items: row.items || [],
+              subtotal: Number(row.subtotal),
+              deliveryFee: Number(row.delivery_fee),
+              serviceFee: Number(row.service_fee || 0),
+              total: Number(row.total),
+              paymentMethod: row.payment_method,
+              paymentStatus: row.payment_status,
+              deliveryAddress: row.delivery_address,
+              customerNotes: row.customer_notes,
+              estimatedDeliveryTime: row.estimated_delivery_time,
+              createdAt: row.created_at,
+              cancellationReason: parsed.cancellationReason,
+              cancelledBy: parsed.cancelledBy,
+              incidentReason: parsed.incidentReason,
+            };
+          });
           setOrders(mappedOrders);
         }
       } catch (err) {
@@ -363,6 +425,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const row: any = payload.new;
+            const parsed = parseOrderNotes(row.customer_notes);
             const newOrder: Order = {
               id: row.id,
               orderNumber: row.order_number,
@@ -371,8 +434,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               customerPhone: row.customer_phone,
               restaurantId: row.restaurant_id || '',
               restaurantName: row.restaurant_name,
-              driverId: row.driver_id,
-              driverName: row.driver_name,
+              driverId: row.driver_id || undefined,
+              driverName: row.driver_name || undefined,
               status: row.status,
               items: row.items || [],
               subtotal: Number(row.subtotal),
@@ -385,19 +448,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               customerNotes: row.customer_notes,
               estimatedDeliveryTime: row.estimated_delivery_time,
               createdAt: row.created_at,
+              cancellationReason: parsed.cancellationReason,
+              cancelledBy: parsed.cancelledBy,
+              incidentReason: parsed.incidentReason,
             };
             setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== newOrder.id)]);
           } else if (payload.eventType === 'UPDATE') {
             const row: any = payload.new;
+            const parsed = parseOrderNotes(row.customer_notes);
             setOrders((prev) =>
               prev.map((o) =>
                 o.id === row.id
                   ? {
                       ...o,
                       status: row.status,
-                      driverId: row.driver_id,
-                      driverName: row.driver_name,
+                      driverId: row.driver_id || undefined,
+                      driverName: row.driver_name || undefined,
                       paymentStatus: row.payment_status,
+                      customerNotes: row.customer_notes,
+                      cancellationReason: parsed.cancellationReason || o.cancellationReason,
+                      cancelledBy: parsed.cancelledBy || o.cancelledBy,
+                      incidentReason: parsed.incidentReason || o.incidentReason,
                     }
                   : o
               )
@@ -530,54 +601,165 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Manejo de pedidos sincronizado con Supabase
-  const addOrder = async (newOrder: Order) => {
-    setOrders((prev) => [newOrder, ...prev]);
-
-    try {
-      const dbRow = {
-        id: newOrder.id,
-        order_number: newOrder.orderNumber,
-        customer_name: newOrder.customerName,
-        customer_phone: newOrder.customerPhone,
-        restaurant_id: newOrder.restaurantId,
-        restaurant_name: newOrder.restaurantName,
-        driver_id: newOrder.driverId || null,
-        driver_name: newOrder.driverName || null,
-        status: newOrder.status,
-        items: newOrder.items,
-        subtotal: newOrder.subtotal,
-        delivery_fee: newOrder.deliveryFee,
-        service_fee: newOrder.serviceFee,
-        total: newOrder.total,
-        payment_method: newOrder.paymentMethod,
-        payment_status: newOrder.paymentStatus,
-        delivery_address: newOrder.deliveryAddress,
-        customer_notes: newOrder.customerNotes || null,
-        estimated_delivery_time: newOrder.estimatedDeliveryTime || null,
-      };
-
-      const { error } = await supabase.from('orders').insert([dbRow]);
-      if (error) console.error('Error guardando pedido en Supabase:', error);
-    } catch (e) {
-      console.error(e);
+  const addOrder = async (newOrder: Order): Promise<boolean> => {
+    // 1. Validar que el restaurante esté abierto
+    const rest = restaurants.find((r) => r.id === newOrder.restaurantId);
+    if (rest && !rest.isOpen) {
+      throw new Error(`"${rest.name}" se encuentra cerrado en este momento. No es posible procesar el pedido.`);
     }
+
+    // 2. Persistir en Supabase primero para verificar inserción real
+    const dbRow = {
+      id: newOrder.id,
+      order_number: newOrder.orderNumber,
+      customer_name: newOrder.customerName,
+      customer_phone: newOrder.customerPhone,
+      restaurant_id: newOrder.restaurantId,
+      restaurant_name: newOrder.restaurantName,
+      driver_id: newOrder.driverId || null,
+      driver_name: newOrder.driverName || null,
+      status: newOrder.status,
+      items: newOrder.items,
+      subtotal: newOrder.subtotal,
+      delivery_fee: newOrder.deliveryFee,
+      service_fee: newOrder.serviceFee,
+      total: newOrder.total,
+      payment_method: newOrder.paymentMethod,
+      payment_status: newOrder.paymentStatus,
+      delivery_address: newOrder.deliveryAddress,
+      customer_notes: newOrder.customerNotes || null,
+      estimated_delivery_time: newOrder.estimatedDeliveryTime || null,
+    };
+
+    const { error } = await supabase.from('orders').insert([dbRow]);
+    if (error) {
+      console.error('Error guardando pedido en Supabase:', error);
+      throw new Error('Hubo un problema de conexión al registrar la orden. Por favor intenta de nuevo.');
+    }
+
+    // Actualizar estado local sólo después de confirmar guardado
+    setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== newOrder.id)]);
+    return true;
   };
 
-  const updateOrderStatus = async (orderId: string, status: OrderStatus) => {
+  const updateOrderStatus = async (
+    orderId: string,
+    newStatus: OrderStatus,
+    reason?: string,
+    cancelledBy?: 'CLIENTE' | 'RESTAURANTE' | 'SISTEMA' | 'ADMINISTRADOR'
+  ): Promise<boolean> => {
+    const current = orders.find((o) => o.id === orderId);
+    if (!current) return false;
+
+    // Validar transición permitida en ciclo de vida
+    const allowed = VALID_ORDER_TRANSITIONS[current.status] || [];
+    if (!allowed.includes(newStatus)) {
+      console.warn(
+        `Transición de estado rechazada: de ${current.status} a ${newStatus} para la orden ${orderId}`
+      );
+      return false;
+    }
+
+    let updatedNotes = current.customerNotes;
+    if (reason) {
+      const tag = cancelledBy ? `Cancelado por ${cancelledBy}: ${reason}` : `Motivo: ${reason}`;
+      updatedNotes = current.customerNotes ? `${current.customerNotes} | [${tag}]` : `[${tag}]`;
+    }
+
     setOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, status } : o))
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: newStatus,
+              cancellationReason: reason || o.cancellationReason,
+              cancelledBy: cancelledBy || o.cancelledBy,
+              customerNotes: updatedNotes,
+            }
+          : o
+      )
     );
 
     try {
-      await supabase.from('orders').update({ status }).eq('id', orderId);
+      const payload: any = { status: newStatus };
+      if (updatedNotes !== current.customerNotes) {
+        payload.customer_notes = updatedNotes;
+      }
+      const { error } = await supabase.from('orders').update(payload).eq('id', orderId);
+      if (error) console.error('Error actualizando pedido en Supabase:', error);
+      return !error;
     } catch (e) {
       console.error(e);
+      return false;
     }
   };
 
-  // Asignar pedido al domiciliario activo
-  const claimOrder = async (orderId: string, driverName: string, driverPhone?: string) => {
+  // Rechazar pedido por parte del restaurante
+  const rejectOrder = async (orderId: string, reason: string): Promise<boolean> => {
+    return await updateOrderStatus(orderId, 'CANCELLED', reason, 'RESTAURANTE');
+  };
+
+  // Cancelar pedido por parte del cliente mientras esté en espera (PENDING)
+  const cancelOrderByCustomer = async (orderId: string, reason?: string): Promise<boolean> => {
+    const current = orders.find((o) => o.id === orderId);
+    if (!current || current.status !== 'PENDING') {
+      return false;
+    }
+    return await updateOrderStatus(
+      orderId,
+      'CANCELLED',
+      reason || 'Cancelado por el cliente antes de ser aceptado por la cocina',
+      'CLIENTE'
+    );
+  };
+
+  // Asignar pedido al domiciliario con prevención de reclamación simultánea (atomic lock)
+  const claimOrder = async (
+    orderId: string,
+    driverName: string,
+    driverPhone?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const target = orders.find((o) => o.id === orderId);
+    if (!target) return { success: false, error: 'Pedido no encontrado' };
+
+    if (
+      target.status !== 'READY_FOR_PICKUP' &&
+      target.status !== 'PREPARING' &&
+      target.status !== 'PENDING'
+    ) {
+      return { success: false, error: 'Este pedido ya no está disponible para ser tomado.' };
+    }
+    if (target.driverId) {
+      return { success: false, error: 'Esta carrera ya fue tomada por otro domiciliario.' };
+    }
+
     const driverId = currentUser?.id || `drv-${Date.now()}`;
+
+    // Operación atómica condicional: sólo actualiza si driver_id es NULL en base de datos
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update({
+          status: 'ON_THE_WAY',
+          driver_id: driverId,
+          driver_name: driverName,
+        })
+        .eq('id', orderId)
+        .is('driver_id', null)
+        .select();
+
+      if (error) {
+        console.warn('Error en reclamo atómico:', error);
+      } else if (data && data.length === 0) {
+        return {
+          success: false,
+          error: 'Esta carrera acaba de ser tomada por otro domiciliario.',
+        };
+      }
+    } catch (e) {
+      console.warn('Excepción en reclamo:', e);
+    }
+
     setOrders((prev) =>
       prev.map((o) =>
         o.id === orderId
@@ -591,17 +773,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       )
     );
 
+    return { success: true };
+  };
+
+  // Liberar carrera por parte del domiciliario ante una incidencia en ruta
+  const unclaimOrder = async (orderId: string, incidentReason: string): Promise<boolean> => {
+    const target = orders.find((o) => o.id === orderId);
+    if (!target || target.status !== 'ON_THE_WAY') return false;
+
+    const noteTag = `[Incidencia Repartidor: ${incidentReason} (${target.driverName || 'repartidor'})]`;
+    const updatedNotes = target.customerNotes ? `${target.customerNotes} | ${noteTag}` : noteTag;
+
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'READY_FOR_PICKUP',
+              driverId: undefined,
+              driverName: undefined,
+              customerNotes: updatedNotes,
+              incidentReason,
+            }
+          : o
+      )
+    );
+
     try {
       await supabase
         .from('orders')
         .update({
-          status: 'ON_THE_WAY',
-          driver_id: driverId,
-          driver_name: driverName,
+          status: 'READY_FOR_PICKUP',
+          driver_id: null,
+          driver_name: null,
+          customer_notes: updatedNotes,
         })
         .eq('id', orderId);
+      return true;
     } catch (e) {
-      console.error('Error asignando repartidor:', e);
+      console.error('Error liberando carrera:', e);
+      return false;
     }
   };
 
@@ -940,9 +1151,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         loginAsDriver,
         logout,
         claimOrder,
+        unclaimOrder,
         orders,
         addOrder,
         updateOrderStatus,
+        rejectOrder,
+        cancelOrderByCustomer,
       }}
     >
       {children}

@@ -757,6 +757,16 @@ export default function AdminPage() {
                             Repartidor asignado: {o.driverName}
                           </p>
                         )}
+                        {o.status === 'CANCELLED' && (
+                          <p className="text-red-600 font-semibold text-[11px]">
+                            Cancelado por: {o.cancelledBy || 'SISTEMA'} {o.cancellationReason ? `(${o.cancellationReason})` : ''}
+                          </p>
+                        )}
+                        {o.incidentReason && (
+                          <p className="text-amber-600 font-semibold text-[11px]">
+                            Incidencia repartidor: {o.incidentReason}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-3">
@@ -780,12 +790,13 @@ export default function AdminPage() {
                         {o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && (
                           <button
                             onClick={() => {
-                              if (window.confirm(`¿Cancelar forzosamente el pedido ${o.orderNumber}?`)) {
-                                updateOrderStatus(o.id, 'CANCELLED');
+                              const reason = window.prompt(`Motivo de cancelación forzosa del pedido ${o.orderNumber}:`, 'Intervención de soporte administrativo');
+                              if (reason !== null) {
+                                updateOrderStatus(o.id, 'CANCELLED', reason || 'Intervención por Administración', 'ADMINISTRADOR');
                                 showNotice(`Pedido ${o.orderNumber} cancelado forzosamente`);
                               }
                             }}
-                            className="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold px-2.5 py-1.5 rounded-xl border border-red-200"
+                            className="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold px-2.5 py-1.5 rounded-xl border border-red-200 cursor-pointer"
                             title="Cancelar pedido de emergencia"
                           >
                             Cancelar

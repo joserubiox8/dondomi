@@ -154,6 +154,19 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
           </div>
         </div>
 
+        {/* Closed Restaurant Alert Banner */}
+        {!restaurant.isOpen && (
+          <div className="bg-amber-500/10 border-2 border-amber-500/30 rounded-3xl p-4 flex items-center gap-3 text-amber-900 shadow-2xs">
+            <Info className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <div>
+              <h4 className="font-extrabold text-xs sm:text-sm">Restaurante cerrado temporalmente</h4>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                Horario de atención: <strong>{restaurant.openingHours}</strong>. Puedes ver los platos de la carta, pero las compras están deshabilitadas hasta su reapertura.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Category Pills inside Restaurant con animación y alto contraste */}
         <div className="sticky top-16 z-20 bg-slate-50/95 backdrop-blur-md py-2.5 -mx-4 px-4 overflow-x-auto no-scrollbar border-b border-slate-200/60">
           <div className="flex items-center gap-2">
@@ -191,70 +204,96 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
           </div>
 
           <div className="space-y-3.5">
-            {filteredProducts.map((product) => (
-              <div
-                key={product.id}
-                onClick={() => setActiveModalProduct(product)}
-                className="bg-white rounded-3xl p-5 border-2 border-slate-300 shadow-xs hover:border-orange-500 hover:shadow-md transition cursor-pointer flex flex-col justify-between gap-3.5 group active:scale-[0.99]"
-              >
-                {/* Product Text Details */}
-                <div className="space-y-1.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <h4 className="text-base font-extrabold text-slate-900 group-hover:text-orange-600 transition leading-snug">
-                      {product.name}
-                    </h4>
-                    {product.isPopular && (
-                      <span className="flex-shrink-0 bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        🔥 Popular
-                      </span>
-                    )}
-                  </div>
+            {filteredProducts.map((product) => {
+              const isAvailable = product.isAvailable !== false;
+              const canOrder = restaurant.isOpen && isAvailable;
 
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    {product.description}
-                  </p>
-
-                  {product.options && product.options.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {product.options.map((opt) => (
-                        <span
-                          key={opt.id}
-                          className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"
-                        >
-                          + {opt.name}
-                        </span>
-                      ))}
+              return (
+                <div
+                  key={product.id}
+                  onClick={() => setActiveModalProduct(product)}
+                  className={`bg-white rounded-3xl p-5 border-2 transition cursor-pointer flex flex-col justify-between gap-3.5 group active:scale-[0.99] ${
+                    !isAvailable
+                      ? 'border-slate-200 opacity-60 grayscale-[35%]'
+                      : 'border-slate-300 shadow-xs hover:border-orange-500 hover:shadow-md'
+                  }`}
+                >
+                  {/* Product Text Details */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="text-base font-extrabold text-slate-900 group-hover:text-orange-600 transition leading-snug">
+                        {product.name}
+                      </h4>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {!isAvailable && (
+                          <span className="bg-slate-200 text-slate-700 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full">
+                            Agotado hoy
+                          </span>
+                        )}
+                        {product.isPopular && isAvailable && (
+                          <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            🔥 Popular
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  )}
-                </div>
 
-                {/* Bottom Row: Price and Add Button */}
-                <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-base font-black text-slate-900 group-hover:text-orange-600 transition">
-                      {formatCOP(product.price)}
-                    </span>
-                    {product.originalPrice && (
-                      <span className="text-xs text-slate-400 line-through">
-                        {formatCOP(product.originalPrice)}
-                      </span>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {product.description}
+                    </p>
+
+                    {product.options && product.options.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {product.options.map((opt) => (
+                          <span
+                            key={opt.id}
+                            className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"
+                          >
+                            + {opt.name}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveModalProduct(product);
-                    }}
-                    className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition active:scale-95"
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                    <span>Agregar</span>
-                  </button>
+                  {/* Bottom Row: Price and Add Button */}
+                  <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-base font-black text-slate-900 group-hover:text-orange-600 transition">
+                        {formatCOP(product.price)}
+                      </span>
+                      {product.originalPrice && (
+                        <span className="text-xs text-slate-400 line-through">
+                          {formatCOP(product.originalPrice)}
+                        </span>
+                      )}
+                    </div>
+
+                    {canOrder ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveModalProduct(product);
+                        }}
+                        className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 transition active:scale-95"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Agregar</span>
+                      </button>
+                    ) : !isAvailable ? (
+                      <span className="bg-slate-100 text-slate-400 font-bold text-xs px-3 py-1.5 rounded-xl border border-slate-200">
+                        Agotado
+                      </span>
+                    ) : (
+                      <span className="bg-slate-100 text-slate-400 font-bold text-xs px-3 py-1.5 rounded-xl border border-slate-200">
+                        Cerrado
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -263,6 +302,7 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
       <ProductModal
         product={activeModalProduct}
         restaurantName={restaurant.name}
+        isRestaurantOpen={restaurant.isOpen}
         onClose={() => setActiveModalProduct(null)}
       />
     </div>

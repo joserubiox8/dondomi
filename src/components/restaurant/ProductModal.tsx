@@ -9,12 +9,14 @@ import { useApp } from '@/context/AppContext';
 interface ProductModalProps {
   product: Product | null;
   restaurantName: string;
+  isRestaurantOpen?: boolean;
   onClose: () => void;
 }
 
 export default function ProductModal({
   product,
   restaurantName,
+  isRestaurantOpen = true,
   onClose,
 }: ProductModalProps) {
   const { addToCart } = useApp();
@@ -45,8 +47,15 @@ export default function ProductModal({
 
   const unitTotal = product.price + additionalOptionsPrice;
   const grandTotal = unitTotal * quantity;
+  const isAvailable = product.isAvailable !== false;
+  const canAdd = isAvailable && isRestaurantOpen;
 
   const handleAdd = () => {
+    if (!canAdd) {
+      alert(!isAvailable ? 'Este plato está agotado por hoy.' : 'El restaurante se encuentra cerrado en este momento.');
+      return;
+    }
+
     // Validar requeridos
     if (product.options) {
       for (const group of product.options) {
@@ -119,6 +128,20 @@ export default function ProductModal({
           <p className="text-xs text-slate-600 mt-2 leading-relaxed">
             {product.description}
           </p>
+
+          {!isAvailable && (
+            <div className="mt-3 bg-slate-100 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-700 font-bold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+              <span>Este plato se encuentra agotado por el día de hoy en cocina.</span>
+            </div>
+          )}
+
+          {!isRestaurantOpen && isAvailable && (
+            <div className="mt-3 bg-amber-50 border border-amber-300 rounded-xl p-2.5 text-xs text-amber-900 font-bold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span>El restaurante se encuentra cerrado en este momento.</span>
+            </div>
+          )}
         </div>
 
         {/* Scrollable details */}
@@ -216,10 +239,11 @@ export default function ProductModal({
         {/* Bottom action bar */}
         <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center gap-3">
           {/* Quantity selector */}
-          <div className="flex items-center bg-white border border-slate-200 rounded-2xl p-1 shadow-xs">
+          <div className={`flex items-center bg-white border border-slate-200 rounded-2xl p-1 shadow-xs ${!canAdd ? 'opacity-50 pointer-events-none' : ''}`}>
             <button
+              disabled={!canAdd}
               onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-              className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-600 hover:bg-slate-100 active:scale-95 transition"
+              className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-600 hover:bg-slate-100 active:scale-95 transition disabled:cursor-not-allowed"
             >
               <Minus className="w-4 h-4" />
             </button>
@@ -227,21 +251,31 @@ export default function ProductModal({
               {quantity}
             </span>
             <button
+              disabled={!canAdd}
               onClick={() => setQuantity((q) => q + 1)}
-              className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-600 hover:bg-slate-100 active:scale-95 transition"
+              className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-600 hover:bg-slate-100 active:scale-95 transition disabled:cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
             </button>
           </div>
 
           {/* Add button */}
-          <button
-            onClick={handleAdd}
-            className="flex-1 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-bold py-3 px-4 rounded-2xl shadow-md shadow-orange-500/25 flex items-center justify-between transition active:scale-[0.98]"
-          >
-            <span>Agregar al pedido</span>
-            <span>{formatCOP(grandTotal)}</span>
-          </button>
+          {canAdd ? (
+            <button
+              onClick={handleAdd}
+              className="flex-1 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-bold py-3 px-4 rounded-2xl shadow-md shadow-orange-500/25 flex items-center justify-between transition active:scale-[0.98] cursor-pointer"
+            >
+              <span>Agregar al pedido</span>
+              <span>{formatCOP(grandTotal)}</span>
+            </button>
+          ) : (
+            <button
+              disabled
+              className="flex-1 bg-slate-200 text-slate-500 font-bold py-3 px-4 rounded-2xl cursor-not-allowed text-center text-xs"
+            >
+              {!isAvailable ? 'Plato Agotado Hoy' : 'Restaurante Cerrado'}
+            </button>
+          )}
         </div>
       </div>
     </div>
