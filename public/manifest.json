@@ -1,16 +1,31 @@
 {
   "name": "DonDomi - Domicilios Valledupar",
   "short_name": "DonDomi",
-  "description": "Pide comida de tus restaurantes locales favoritos en Valledupar rápido y fácil.",
+  "description": "Pide tus platos favoritos y salchipapas en Valledupar con tarifa fija de domicilio de $7.000 COP.",
   "start_url": "/",
+  "id": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
   "theme_color": "#ea580c",
+  "categories": ["food", "delivery", "shopping"],
   "icons": [
     {
-      "src": "/favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
+      "src": "/brand/dondomi-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/brand/dondomi-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/brand/dondomi-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
     }
   ]
 }

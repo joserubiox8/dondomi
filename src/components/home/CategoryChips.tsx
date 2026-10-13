@@ -2,11 +2,10 @@
 
 import React from 'react';
 import { ChevronRight } from 'lucide-react';
-import { FOOD_CATEGORIES } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 
 export default function CategoryChips() {
-  const { selectedCategorySlug, setSelectedCategorySlug } = useApp();
+  const { categories, selectedCategorySlug, setSelectedCategorySlug } = useApp();
 
   return (
     <div className="space-y-2">
@@ -48,7 +47,7 @@ export default function CategoryChips() {
         </button>
 
         {/* Categories list */}
-        {FOOD_CATEGORIES.map((cat) => {
+        {categories.map((cat) => {
           const isSelected = selectedCategorySlug === cat.slug;
           return (
             <button

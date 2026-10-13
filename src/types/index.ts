@@ -95,7 +95,8 @@ export interface Restaurant {
   acceptsBreb?: boolean; // Llave Bre-B (Transferencias interbancarias inmediatas)
   acceptsCard?: boolean; // Tarjetas crédito/débito (vía Wompi u otra pasarela)
   featured?: boolean;
-  pin?: string; // PIN de 4 dígitos para acceso exclusivo de la cocina en /merchant
+  pin?: string; // PIN de 4 dígitos para acceso de contingencia
+  email?: string; // Correo de acceso del restaurante
 }
 
 export type OrderStatus =
@@ -153,16 +154,21 @@ export interface Order {
 
 export interface Driver {
   id: string;
-  userId: string;
+  userId?: string;
   name: string;
   phone: string;
-  vehicleType: 'MOTO' | 'BICICLETA';
+  email: string;
+  plate: string;
   licensePlate?: string;
-  isAvailable: boolean;
-  currentZone: string; // Ej: "Norte - Novalito"
+  vehicleType?: 'MOTO' | 'BICICLETA';
+  isActive: boolean;
+  isAvailable?: boolean;
+  currentZone?: string;
   rating: number;
-  completedDeliveries: number;
+  totalDeliveries: number;
+  completedDeliveries?: number;
   activeOrderId?: string;
+  createdAt: string;
 }
 
 export interface DeliveryAssignment {

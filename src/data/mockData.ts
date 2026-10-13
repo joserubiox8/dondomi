@@ -1,4 +1,4 @@
-import { Restaurant, FoodCategory, Product, Order, Address } from '@/types';
+import { Restaurant, FoodCategory, Product, Order, Address, Driver } from '@/types';
 
 export const VALLEDUPAR_NEIGHBORHOODS = [
   'Novalito',
@@ -54,6 +54,7 @@ export const RESTAURANTS: Restaurant[] = [
     acceptsBreb: true,
     acceptsDaviplata: true,
     featured: true,
+    email: 'elvalle@dondomi.com',
   },
   {
     id: 'rest-2',
@@ -80,6 +81,7 @@ export const RESTAURANTS: Restaurant[] = [
     acceptsBreb: true,
     acceptsDaviplata: true,
     featured: true,
+    email: 'guatapuri@dondomi.com',
   },
   {
     id: 'rest-3',
@@ -106,6 +108,7 @@ export const RESTAURANTS: Restaurant[] = [
     acceptsBreb: true,
     acceptsDaviplata: true,
     featured: true,
+    email: 'pedro@dondomi.com',
   },
   {
     id: 'rest-4',
@@ -542,5 +545,30 @@ export const MOCK_ORDERS: Order[] = [
     },
     createdAt: '2026-10-01T20:52:00Z',
     estimatedDeliveryTime: '21:10 - 21:20',
+  },
+];
+
+export const INITIAL_DRIVERS: Driver[] = [
+  {
+    id: 'drv-1',
+    name: 'Javier Morales',
+    phone: '300 123 4567',
+    email: 'javier@dondomi.com',
+    plate: 'ABC-12D',
+    isActive: true,
+    totalDeliveries: 142,
+    rating: 4.9,
+    createdAt: '2026-09-01T10:00:00.000Z',
+  },
+  {
+    id: 'drv-2',
+    name: 'Carlos Mendoza',
+    phone: '310 987 6543',
+    email: 'carlos@dondomi.com',
+    plate: 'XYZ-89F',
+    isActive: true,
+    totalDeliveries: 98,
+    rating: 4.8,
+    createdAt: '2026-09-15T10:00:00.000Z',
   },
 ];

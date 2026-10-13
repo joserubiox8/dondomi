@@ -212,63 +212,88 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
 
       <main className="max-w-md mx-auto px-4 py-4 space-y-4">
         {/* Banner de Estado Principal */}
-        <div className="bg-gradient-to-r from-orange-600 via-red-600 to-amber-600 rounded-3xl p-5 text-white shadow-lg shadow-orange-500/15 text-center space-y-2">
-          <div className="inline-flex items-center gap-1.5 bg-black/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-            <span>{steps[currentStepIdx]?.title}</span>
+        {order.status === 'CANCELLED' ? (
+          <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 rounded-3xl p-6 text-white shadow-lg text-center space-y-2">
+            <div className="inline-flex items-center gap-1.5 bg-black/30 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-red-200">
+              <AlertCircle className="w-3.5 h-3.5 text-red-300" />
+              <span>Pedido Cancelado</span>
+            </div>
+            <h2 className="text-xl font-black">
+              No fue confirmado a tiempo
+            </h2>
+            <p className="text-xs text-red-100 max-w-xs mx-auto">
+              El restaurante no confirmó el pedido en el tiempo reglamentario de 15 minutos. No se realizó ningún cobro.
+            </p>
+            <div className="pt-2">
+              <Link
+                href="/"
+                className="inline-block bg-white text-slate-900 font-extrabold text-xs px-5 py-2.5 rounded-2xl shadow-md hover:bg-slate-100 transition"
+              >
+                Elegir otro restaurante
+              </Link>
+            </div>
           </div>
-          <h2 className="text-xl font-black">
-            {order.status === 'DELIVERED'
-              ? '¡Pedido Entregado!'
-              : `Tiempo estimado: ${order.estimatedDeliveryTime || '30-40 min'}`}
-          </h2>
-          <p className="text-xs text-orange-100">
-            {steps[currentStepIdx]?.desc}
-          </p>
-        </div>
+        ) : (
+          <div className="bg-gradient-to-r from-orange-600 via-red-600 to-amber-600 rounded-3xl p-5 text-white shadow-lg shadow-orange-500/15 text-center space-y-2">
+            <div className="inline-flex items-center gap-1.5 bg-black/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              <span>{steps[currentStepIdx]?.title}</span>
+            </div>
+            <h2 className="text-xl font-black">
+              {order.status === 'DELIVERED'
+                ? '¡Pedido Entregado!'
+                : `Tiempo estimado: ${order.estimatedDeliveryTime || '30-40 min'}`}
+            </h2>
+            <p className="text-xs text-orange-100">
+              {steps[currentStepIdx]?.desc}
+            </p>
+          </div>
+        )}
 
-        {/* Línea de Tiempo / Stepper */}
-        <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
-          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">
-            Progreso del Pedido
-          </h3>
+        {/* Línea de Tiempo / Stepper (solo si no está cancelado) */}
+        {order.status !== 'CANCELLED' && (
+          <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">
+              Progreso del Pedido
+            </h3>
 
-          <div className="space-y-4 relative pl-7 before:absolute before:left-3 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-            {steps.map((st, idx) => {
-              const isDone = idx <= currentStepIdx;
-              const isCurrent = idx === currentStepIdx;
-              const Icon = st.icon;
+            <div className="space-y-4 relative pl-7 before:absolute before:left-3 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+              {steps.map((st, idx) => {
+                const isDone = idx <= currentStepIdx;
+                const isCurrent = idx === currentStepIdx;
+                const Icon = st.icon;
 
-              return (
-                <div key={st.key} className="relative flex items-start gap-3">
-                  <div
-                    className={`absolute -left-7 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
-                      isDone
-                        ? isCurrent
-                          ? 'bg-orange-600 text-white ring-4 ring-orange-100 scale-110'
-                          : 'bg-emerald-600 text-white'
-                        : 'bg-slate-200 text-slate-400'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                    <span
-                      className={`text-xs font-bold block ${
-                        isDone ? 'text-slate-900' : 'text-slate-400'
+                return (
+                  <div key={st.key} className="relative flex items-start gap-3">
+                    <div
+                      className={`absolute -left-7 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
+                        isDone
+                          ? isCurrent
+                            ? 'bg-orange-600 text-white ring-4 ring-orange-100 scale-110'
+                            : 'bg-emerald-600 text-white'
+                          : 'bg-slate-200 text-slate-400'
                       }`}
                     >
-                      {st.title}
-                    </span>
-                    <span className="text-[11px] text-slate-500 block leading-tight">
-                      {st.desc}
-                    </span>
+                      <Icon className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <span
+                        className={`text-xs font-bold block ${
+                          isDone ? 'text-slate-900' : 'text-slate-400'
+                        }`}
+                      >
+                        {st.title}
+                      </span>
+                      <span className="text-[11px] text-slate-500 block leading-tight">
+                        {st.desc}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Repartidor Asignado en Ruta */}
         {order.driverName && (

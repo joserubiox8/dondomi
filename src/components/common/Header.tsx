@@ -12,6 +12,7 @@ export default function Header() {
     cartSubtotal,
     currentUser,
     logout,
+    globalDeliveryFee,
   } = useApp();
 
   return (
@@ -45,7 +46,7 @@ export default function Header() {
               Valledupar, Cesar
             </span>
             <span className="text-xs font-bold text-slate-800 truncate block">
-              Domicilio fijo $7.000 COP
+              Domicilio fijo {formatCOP(globalDeliveryFee || 7000)}
             </span>
           </div>
         </div>

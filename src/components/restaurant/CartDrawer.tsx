@@ -37,6 +37,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     currentNeighborhood,
     restaurants,
     addOrder,
+    globalDeliveryFee,
   } = useApp();
 
   const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD'>('NEQUI');
@@ -51,8 +52,8 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   if (!isOpen) return null;
 
   const currentRestaurant = restaurants.find((r) => r.id === cartRestaurantId);
-  const deliveryFee = 7000; // Tarifa plana $7.000 COP en todo Valledupar
-  const platformFee = 0; // $0 COP tarifa de servicio DonDomi (100% gratis en el MVP)
+  const deliveryFee = globalDeliveryFee || 7000; // Tarifa configurada por la plataforma
+  const platformFee = 0; // $0 COP tarifa de servicio DonDomi
   const grandTotal = cartSubtotal + deliveryFee;
 
   const handleCheckout = (e: React.FormEvent) => {

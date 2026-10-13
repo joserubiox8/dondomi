@@ -31,11 +31,13 @@ export default function DriverPage() {
     updateOrderStatus,
     logout,
     loginAsDriver,
+    globalDeliveryFee,
   } = useApp();
 
   const [isAvailable, setIsAvailable] = useState<boolean>(true);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
+  const defaultFee = globalDeliveryFee || 7000;
   const driverId = currentUser?.role === 'DOMICILIARIO' ? currentUser.id : 'drv-demo';
   const driverName = currentUser?.role === 'DOMICILIARIO' ? currentUser.name : 'Domiciliario DonDomi';
 
@@ -57,15 +59,37 @@ export default function DriverPage() {
     (o) => (o.driverId === driverId || o.driverName === driverName) && o.status === 'DELIVERED'
   );
 
-  const totalEarnings = deliveredOrders.reduce((acc, o) => acc + (o.deliveryFee || 7000), 0);
+  const totalEarnings = deliveredOrders.reduce((acc, o) => acc + (o.deliveryFee || defaultFee), 0);
+
+  // Sonido de alerta para carreras
+  const playChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    } catch {}
+  };
 
   const handleClaim = async (order: Order) => {
+    playChime();
     await claimOrder(order.id, driverName, currentUser?.phone || '3001234567');
     setSuccessNotice(`¡Carrera #${order.orderNumber} aceptada! Dirígete al restaurante.`);
     setTimeout(() => setSuccessNotice(null), 4000);
   };
 
   const handleDeliver = async (orderId: string) => {
+    playChime();
     await updateOrderStatus(orderId, 'DELIVERED');
     setSuccessNotice(`¡Excelente! Entrega confirmada y liquidada.`);
     setTimeout(() => setSuccessNotice(null), 4000);
@@ -180,9 +204,9 @@ export default function DriverPage() {
             </span>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase text-slate-400 block">Tarifa Fija</span>
+            <span className="text-[10px] font-bold uppercase text-slate-400 block">Tarifa Domicilio</span>
             <span className="text-xl font-black text-orange-600 mt-0.5 block">
-              {formatCOP(7000)}
+              {formatCOP(defaultFee)}
             </span>
           </div>
         </div>
@@ -206,9 +230,46 @@ export default function DriverPage() {
               </div>
 
               <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100">
-                +{formatCOP(activeOrder.deliveryFee || 7000)}
+                +{formatCOP(activeOrder.deliveryFee || defaultFee)}
               </span>
             </div>
+
+            {/* Aviso Destacado de Cobro al Cliente */}
+            {activeOrder.paymentMethod === 'EFECTIVO' ? (
+              <div className="bg-amber-500/10 border-2 border-amber-500 rounded-2xl p-3.5 flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center shrink-0 font-black text-sm">
+                  $
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 block">
+                    Instrucción de Cobro
+                  </span>
+                  <p className="text-sm font-black text-amber-950">
+                    COBRAR EN EFECTIVO: {formatCOP(activeOrder.total)}
+                  </p>
+                  <p className="text-[11px] text-amber-900 mt-0.5 font-medium">
+                    Recibe el dinero en efectivo del cliente antes de entregar los alimentos.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-emerald-500/10 border-2 border-emerald-500 rounded-2xl p-3.5 flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 font-black text-sm">
+                  ✓
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
+                    Instrucción de Cobro
+                  </span>
+                  <p className="text-sm font-black text-emerald-950">
+                    YA PAGADO DIGITAL ({activeOrder.paymentMethod}) — NO COBRAR
+                  </p>
+                  <p className="text-[11px] text-emerald-900 mt-0.5 font-medium">
+                    El cliente ya pagó la orden completa en línea. Solo entrega la comida.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Ruta en Valledupar */}
             <div className="space-y-3 relative pl-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
@@ -242,14 +303,6 @@ export default function DriverPage() {
 
             {/* Información del pedido */}
             <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs space-y-1.5">
-              <div className="flex justify-between text-slate-600">
-                <span>Forma de cobro:</span>
-                <span className="font-bold text-slate-900">
-                  {activeOrder.paymentMethod === 'EFECTIVO'
-                    ? `Cobrar Efectivo: ${formatCOP(activeOrder.total)}`
-                    : `Pagado Digital (${activeOrder.paymentMethod})`}
-                </span>
-              </div>
               <div className="flex justify-between text-slate-600">
                 <span>Platos del pedido:</span>
                 <span className="font-semibold text-slate-800">
@@ -303,7 +356,7 @@ export default function DriverPage() {
               <span>Carreras Disponibles ({availableOrders.length})</span>
             </h3>
             <span className="text-[11px] text-slate-400 font-semibold">
-              Tarifa fija $7.000 COP
+              Tarifa {formatCOP(defaultFee)}
             </span>
           </div>
 
@@ -332,7 +385,7 @@ export default function DriverPage() {
                       </span>
                     </div>
                     <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-                      +{formatCOP(order.deliveryFee || 7000)}
+                      +{formatCOP(order.deliveryFee || defaultFee)}
                     </span>
                   </div>
 
@@ -353,9 +406,17 @@ export default function DriverPage() {
                   </div>
 
                   <div className="flex items-center justify-between pt-1">
-                    <span className="text-[11px] text-slate-500 font-medium">
-                      Pago: <strong className="text-slate-800">{order.paymentMethod}</strong>
-                    </span>
+                    <div>
+                      {order.paymentMethod === 'EFECTIVO' ? (
+                        <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                          Cobrar Efectivo: {formatCOP(order.total)}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          Pagado Digital ({order.paymentMethod})
+                        </span>
+                      )}
+                    </div>
                     <button
                       onClick={() => handleClaim(order)}
                       className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-4 py-2 rounded-xl text-xs shadow-md shadow-orange-500/20 transition flex items-center gap-1.5"
@@ -392,7 +453,7 @@ export default function DriverPage() {
                     </div>
                   </div>
                   <span className="font-extrabold text-emerald-600">
-                    +{formatCOP(o.deliveryFee || 7000)}
+                    +{formatCOP(o.deliveryFee || defaultFee)}
                   </span>
                 </div>
               ))}

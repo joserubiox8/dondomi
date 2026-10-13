@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Bike, ChefHat, Clock, CheckCircle2, ChevronRight, X } from 'lucide-react';
+import { Bike, ChefHat, Clock, CheckCircle2, ChevronRight, X, AlertCircle } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Order, OrderStatus } from '@/types';
 
@@ -30,12 +30,75 @@ export default function ActiveOrderBanner() {
       o.orderNumber.toLowerCase() === `dd-${activeOrderNumber}`.toLowerCase()
   );
 
-  if (!order || order.status === 'CANCELLED') return null;
+  if (!order) return null;
+
+  // Expiración por antigüedad: si fue creado hace más de 12 horas, limpiar memoria
+  const orderAgeMs = Date.now() - new Date(order.createdAt).getTime();
+  if (orderAgeMs > 12 * 3600 * 1000) {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('dondomi_active_order');
+    }
+    return null;
+  }
 
   const isDelivered = order.status === 'DELIVERED';
+  const isCancelled = order.status === 'CANCELLED';
   const isPending = order.status === 'PENDING';
   const isPreparing = order.status === 'PREPARING' || order.status === 'CONFIRMED';
   const isOnTheWay = order.status === 'ON_THE_WAY' || order.status === 'READY_FOR_PICKUP';
+
+  // Si fue entregado hace más de 2 horas, auto-limpiar
+  if (isDelivered && orderAgeMs > 2 * 3600 * 1000) {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('dondomi_active_order');
+    }
+    return null;
+  }
+
+  const handleDismiss = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDismissed(true);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('dondomi_active_order');
+    }
+  };
+
+  // BANNER DE PEDIDO CANCELADO / NO CONFIRMADO A TIEMPO
+  if (isCancelled) {
+    return (
+      <div className="animate-in slide-in-from-top-2 duration-300">
+        <div className="rounded-3xl p-4 bg-slate-900 border border-red-500/40 text-white shadow-lg flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center flex-shrink-0 border border-red-500/30">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] font-black uppercase tracking-wider bg-red-950/80 text-red-300 px-2 py-0.5 rounded-full border border-red-800/40">
+                  Pedido #{order.orderNumber}
+                </span>
+                <span className="text-xs text-slate-400 truncate">• {order.restaurantName}</span>
+              </div>
+              <h3 className="font-extrabold text-sm text-red-200 mt-0.5">
+                Pedido cancelado automáticamente
+              </h3>
+              <p className="text-[11px] text-slate-400 leading-tight">
+                El restaurante no confirmó a tiempo. No se realizó ningún cobro.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleDismiss}
+            className="flex-shrink-0 bg-red-600 hover:bg-red-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl transition shadow-xs whitespace-nowrap"
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const getStatusText = (status: OrderStatus) => {
     switch (status) {
@@ -51,15 +114,6 @@ export default function ActiveOrderBanner() {
         return 'Entregado con éxito';
       default:
         return 'En proceso';
-    }
-  };
-
-  const handleDismiss = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDismissed(true);
-    if (isDelivered && typeof window !== 'undefined') {
-      localStorage.removeItem('dondomi_active_order');
     }
   };
 
@@ -121,7 +175,7 @@ export default function ActiveOrderBanner() {
             <button
               onClick={handleDismiss}
               className="w-7 h-7 rounded-full bg-black/20 hover:bg-black/40 flex items-center justify-center text-white/80 hover:text-white transition"
-              title="Ocultar aviso"
+              title="Cerrar aviso"
             >
               <X className="w-4 h-4" />
             </button>

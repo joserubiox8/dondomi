@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { AppProvider } from '@/context/AppContext';
 import CartFloatBar from '@/components/restaurant/CartFloatBar';
+import PwaInstallPrompt from '@/components/common/PwaInstallPrompt';
 
 const fontSans = Plus_Jakarta_Sans({
   subsets: ['latin'],
@@ -16,6 +17,15 @@ export const metadata: Metadata = {
   description:
     'Pide la mejor comida de tus restaurantes favoritos en Valledupar rápido, fresco y a la puerta de tu casa.',
   manifest: '/manifest.json',
+  icons: {
+    icon: '/brand/dondomi-icon-192.png',
+    apple: '/brand/dondomi-icon-192.png',
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'DonDomi',
+  },
 };
 
 export const viewport: Viewport = {
@@ -23,7 +33,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#ff4726',
+  themeColor: '#ea580c',
 };
 
 export default function RootLayout({
@@ -37,6 +47,7 @@ export default function RootLayout({
         <AppProvider>
           {children}
           <CartFloatBar />
+          <PwaInstallPrompt />
         </AppProvider>
       </body>
     </html>

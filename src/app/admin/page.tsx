@@ -2,9 +2,11 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Shield,
   Store,
+  Bike,
   ShoppingBag,
   TrendingUp,
   DollarSign,
@@ -13,38 +15,54 @@ import {
   ArrowUpRight,
   Plus,
   Eye,
-  Database,
   X,
   Trash2,
-  UtensilsCrossed,
+  Edit2,
   Phone,
   Check,
-  Copy,
   Lock,
   Unlock,
   KeyRound,
   AlertCircle,
+  Megaphone,
+  Save,
+  LogOut,
+  Sliders,
+  Layers,
+  Percent,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
-import { Restaurant, Product, ProductOptionGroup } from '@/types';
+import { Restaurant, FoodCategory, Driver, Order } from '@/types';
+
+type AdminTab = 'CATEGORIAS' | 'RESTAURANTES' | 'DOMICILIARIOS' | 'PEDIDOS' | 'AJUSTES';
 
 export default function AdminPage() {
+  const router = useRouter();
   const {
     restaurants,
     addRestaurant,
     toggleRestaurantStatus,
     orders,
-    productsByRestaurant,
-    addProduct,
-    deleteProduct,
+    categories,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    globalDeliveryFee,
+    setGlobalDeliveryFee,
+    globalAnnouncement,
+    setGlobalAnnouncement,
+    drivers,
+    addDriver,
+    toggleDriverStatus,
+    updateOrderStatus,
     currentUser,
     logout,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'RESTAURANTES' | 'PEDIDOS' | 'TARIFAS' | 'ARQUITECTURA'>('RESTAURANTES');
+  const [activeTab, setActiveTab] = useState<AdminTab>('CATEGORIAS');
 
-  // Master PIN de Administrador (Valor predeterminado: 2026)
+  // Autenticación Master
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [masterPinInput, setMasterPinInput] = useState<string>('');
   const [masterPinError, setMasterPinError] = useState<string | null>(null);
@@ -86,195 +104,237 @@ export default function AdminPage() {
     setIsAdminAuthenticated(false);
   };
 
-  // Modal para afiliar nuevo restaurante
+  // Notificaciones flotantes
+  const [notice, setNotice] = useState<string | null>(null);
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(null), 3500);
+  };
+
+  // ==============================================================
+  // MODAL: CATEGORÍA DE COMIDA ("¿Qué se te antoja hoy?")
+  // ==============================================================
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<FoodCategory | null>(null);
+  const [catName, setCatName] = useState('');
+  const [catSlug, setCatSlug] = useState('');
+  const [catIcon, setCatIcon] = useState('🍟');
+  const [catBadge, setCatBadge] = useState('');
+
+  const handleOpenAddCategory = () => {
+    setEditingCategory(null);
+    setCatName('');
+    setCatSlug('');
+    setCatIcon('🍟');
+    setCatBadge('');
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleOpenEditCategory = (cat: FoodCategory) => {
+    setEditingCategory(cat);
+    setCatName(cat.name);
+    setCatSlug(cat.slug);
+    setCatIcon(cat.icon);
+    setCatBadge(cat.badge || '');
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleSaveCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!catName.trim()) return;
+
+    const slug = catSlug.trim() || catName.trim().toLowerCase().replace(/[\s\W]+/g, '-');
+
+    if (editingCategory) {
+      const updated: FoodCategory = {
+        ...editingCategory,
+        name: catName.trim(),
+        slug,
+        icon: catIcon.trim() || '🍽️',
+        badge: catBadge.trim() || undefined,
+      };
+      updateCategory(updated);
+      showNotice(`✅ Categoría "${updated.name}" actualizada`);
+    } else {
+      const newCat: FoodCategory = {
+        id: `cat-${Date.now()}`,
+        name: catName.trim(),
+        slug,
+        icon: catIcon.trim() || '🍽️',
+        badge: catBadge.trim() || undefined,
+      };
+      addCategory(newCat);
+      showNotice(`🎉 Categoría "${newCat.name}" agregada a la pantalla principal`);
+    }
+
+    setIsCategoryModalOpen(false);
+  };
+
+  const handleDeleteCategory = (catId: string, name: string) => {
+    if (window.confirm(`¿Deseas eliminar la categoría "${name}" de la pantalla principal?`)) {
+      deleteCategory(catId);
+      showNotice(`🗑️ Categoría "${name}" eliminada`);
+    }
+  };
+
+  // ==============================================================
+  // MODAL: AFILIAR RESTAURANTE
+  // ==============================================================
   const [isAddRestModalOpen, setIsAddRestModalOpen] = useState(false);
   const [newRestName, setNewRestName] = useState('');
-  const [newRestNeighborhood, setNewRestNeighborhood] = useState('');
+  const [newRestNeighborhood, setNewRestNeighborhood] = useState('Centro Histórico');
   const [newRestAddress, setNewRestAddress] = useState('');
   const [newRestPhone, setNewRestPhone] = useState('');
+  const [newRestEmail, setNewRestEmail] = useState('');
   const [newRestHours, setNewRestHours] = useState('11:00 AM - 10:00 PM');
-  const [newRestBaseFee, setNewRestBaseFee] = useState(7000);
   const [newRestCommission, setNewRestCommission] = useState(0);
   const [newRestPin, setNewRestPin] = useState('1234');
-  const [newRestTags, setNewRestTags] = useState('Comida Rápida, Salchipapas');
-  const [newRestDescription, setNewRestDescription] = useState('');
-  const [acceptsCash, setAcceptsCash] = useState(true);
-  const [acceptsNequi, setAcceptsNequi] = useState(true);
-  const [acceptsBreb, setAcceptsBreb] = useState(true);
-  const [acceptsDaviplata, setAcceptsDaviplata] = useState(true);
-  const [acceptsCard, setAcceptsCard] = useState(false);
 
-  // Modal para gestionar menú textual
-  const [menuModalRest, setMenuModalRest] = useState<Restaurant | null>(null);
-  const [newProdName, setNewProdName] = useState('');
-  const [newProdCategory, setNewProdCategory] = useState('');
-  const [newProdDesc, setNewProdDesc] = useState('');
-  const [newProdPrice, setNewProdPrice] = useState<number>(20000);
-  const [newProdAdditions, setNewProdAdditions] = useState<string>('Papas extra: 4000, Suero costeño: 2500, Queso frito: 3500');
-
-  // Cálculos de métricas
-  const totalSales = orders.reduce((acc, o) => acc + o.total, 0);
-  const totalCommissions = orders.reduce((acc, o) => acc + o.subtotal * (0 / 100), 0);
-
-  const handleCreateRestaurant = (e: React.FormEvent) => {
+  const handleAddRestaurant = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRestName.trim() || !newRestAddress.trim() || !newRestPhone.trim() || !newRestNeighborhood.trim()) {
-      alert('Por favor completa el nombre, barrio, dirección y teléfono del restaurante.');
+    if (!newRestName.trim() || !newRestPhone.trim()) {
+      alert('Completa el nombre y teléfono del restaurante.');
       return;
     }
 
-    const newId = `rest-${Date.now()}`;
-    const slug = newRestName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-
+    const slug = newRestName.toLowerCase().replace(/[\s\W]+/g, '-');
     const created: Restaurant = {
-      id: newId,
+      id: `rest-${Date.now()}`,
       name: newRestName.trim(),
       slug,
-      description: newRestDescription.trim() || `Restaurante tradicional en ${newRestNeighborhood.trim()}, Valledupar.`,
-      logoUrl: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=200&q=80',
-      bannerUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1000&q=80',
+      description: `Restaurante afiliado a DonDomi en ${newRestNeighborhood}, Valledupar.`,
+      logoUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=200&q=80',
+      bannerUrl: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80',
       rating: 5.0,
       reviewsCount: 1,
-      tags: newRestTags.split(',').map((t) => t.trim()).filter(Boolean),
-      address: newRestAddress.trim(),
+      tags: ['Local', 'Valledupar'],
+      address: newRestAddress.trim() || `Valledupar, Cesar`,
       neighborhood: newRestNeighborhood.trim(),
       phone: newRestPhone.trim(),
+      email: newRestEmail.trim() || `${slug}@dondomi.com`,
       isOpen: true,
       openingHours: newRestHours,
       estimatedTimeMin: 25,
       estimatedTimeMax: 40,
-      deliveryFeeBase: Number(newRestBaseFee),
+      deliveryFeeBase: globalDeliveryFee,
       minOrderAmount: 15000,
       commissionRate: Number(newRestCommission),
       pin: newRestPin.trim() || '1234',
-      acceptsCash,
-      acceptsNequi,
-      acceptsBreb,
-      acceptsDaviplata,
-      acceptsCard,
+      acceptsCash: true,
+      acceptsNequi: true,
+      acceptsBreb: true,
+      acceptsDaviplata: true,
       featured: false,
     };
 
-    addRestaurant(created);
+    await addRestaurant(created);
     setIsAddRestModalOpen(false);
-
-    // Reset fields
     setNewRestName('');
-    setNewRestNeighborhood('');
     setNewRestAddress('');
     setNewRestPhone('');
-    setNewRestDescription('');
-    setNewRestPin('1234');
-    alert(`¡Restaurante "${created.name}" registrado y publicado con éxito!`);
+    setNewRestEmail('');
+    showNotice(`🎉 Restaurante "${created.name}" afiliado con éxito`);
   };
 
+  // ==============================================================
+  // MODAL: REGISTRAR DOMICILIARIO
+  // ==============================================================
+  const [isAddDriverModalOpen, setIsAddDriverModalOpen] = useState(false);
+  const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPhone, setNewDriverPhone] = useState('');
+  const [newDriverPlate, setNewDriverPlate] = useState('');
+  const [newDriverEmail, setNewDriverEmail] = useState('');
 
-
-  const handleDuplicateProduct = (prod: Product) => {
-    if (!menuModalRest) return;
-    const clonedProd: Product = {
-      ...prod,
-      id: `prod-${Date.now()}`,
-      name: `${prod.name} (Copia)`,
-    };
-    addProduct(menuModalRest.id, clonedProd);
-  };
-
-  const handleAddProduct = (e: React.FormEvent) => {
+  const handleAddDriver = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!menuModalRest || !newProdName.trim() || !newProdCategory.trim() || !newProdPrice) {
-      alert('Completa los campos obligatorios del plato.');
+    if (!newDriverName.trim() || !newDriverPhone.trim()) {
+      alert('Completa el nombre y teléfono del domiciliario.');
       return;
     }
 
-    // Parsear adiciones del texto simple ej: "Papas: 4000, Suero: 2500"
-    let optionsGroups: ProductOptionGroup[] = [];
-    if (newProdAdditions.trim()) {
-      const items = newProdAdditions.split(',').map((part, index) => {
-        const [name, priceStr] = part.split(':').map((s) => s.trim());
-        const additionalPrice = Number(priceStr) || 0;
-        return {
-          id: `opt-item-${Date.now()}-${index}`,
-          name: name || 'Adición',
-          additionalPrice,
-        };
-      });
-
-      if (items.length > 0) {
-        optionsGroups.push({
-          id: `grp-${Date.now()}`,
-          name: 'Adiciones extras (opcional)',
-          required: false,
-          minSelect: 0,
-          maxSelect: items.length,
-          items,
-        });
-      }
-    }
-
-    const newProd: Product = {
-      id: `prod-${Date.now()}`,
-      restaurantId: menuModalRest.id,
-      categoryName: newProdCategory.trim(),
-      name: newProdName.trim(),
-      description: newProdDesc.trim() || 'Plato preparado con ingredientes locales frescos.',
-      price: Number(newProdPrice),
-      isAvailable: true,
-      options: optionsGroups.length > 0 ? optionsGroups : undefined,
+    const driver: Driver = {
+      id: `drv-${Date.now()}`,
+      name: newDriverName.trim(),
+      phone: newDriverPhone.trim(),
+      plate: newDriverPlate.trim() || 'MOTO-01',
+      email: newDriverEmail.trim() || `${newDriverName.toLowerCase().replace(/[\s\W]+/g, '')}@dondomi.com`,
+      isActive: true,
+      totalDeliveries: 0,
+      rating: 5.0,
+      createdAt: new Date().toISOString(),
     };
 
-    addProduct(menuModalRest.id, newProd);
-
-    // Limpiar campos del plato
-    setNewProdName('');
-    setNewProdDesc('');
-    setNewProdPrice(20000);
-    alert(`Plato "${newProd.name}" agregado al menú de ${menuModalRest.name}.`);
+    addDriver(driver);
+    setIsAddDriverModalOpen(false);
+    setNewDriverName('');
+    setNewDriverPhone('');
+    setNewDriverPlate('');
+    setNewDriverEmail('');
+    showNotice(`🛵 Domiciliario "${driver.name}" registrado en la flota`);
   };
 
+  // Métricas de Plataforma
+  const totalGMV = orders.filter((o) => o.status === 'DELIVERED').reduce((acc, o) => acc + o.total, 0);
+  const deliveredCount = orders.filter((o) => o.status === 'DELIVERED').length;
+  const activeOrdersCount = orders.filter((o) => o.status !== 'DELIVERED' && o.status !== 'CANCELLED').length;
+
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 pb-20">
-      {/* Admin Top Navigation */}
-      <header className="bg-slate-900 text-white sticky top-0 z-40 border-b border-slate-800 shadow-md">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-orange-600 flex items-center justify-center font-black text-white text-base shadow-sm">
-              DD
-            </div>
+    <div className="min-h-screen bg-slate-100 text-slate-800 pb-20 selection:bg-orange-500 selection:text-white">
+      {/* Top Header */}
+      <header className="bg-slate-900 text-white sticky top-0 z-30 px-4 py-3 shadow-md border-b border-slate-800">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Link
+              href="/"
+              className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300"
+              title="Volver a la App Cliente"
+            >
+              <ArrowUpRight className="w-4 h-4" />
+            </Link>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-base tracking-tight">DonDomi Admin</span>
-                <span className="bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  Valledupar
+                <span className="font-black text-sm tracking-tight text-white">
+                  DonDomi Control Central
+                </span>
+                <span className="bg-orange-600/30 text-orange-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-500/30">
+                  Master Admin
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">Control de plataforma & onboarding MVP</p>
+              <p className="text-[11px] text-slate-400">Valledupar, Cesar</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <Link
               href="/"
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5"
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl border border-slate-700 transition hidden sm:inline-flex items-center gap-1.5"
             >
-              <span>Ver App Cliente</span>
-              <ArrowUpRight className="w-3.5 h-3.5" />
+              <span>Ver App</span>
+              <Eye className="w-3.5 h-3.5" />
             </Link>
 
             {isAdminAuthenticated && (
               <button
                 onClick={handleAdminLock}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5"
-                title="Bloquear panel de administración"
+                title="Bloquear panel maestro"
               >
                 <Lock className="w-3.5 h-3.5" />
-                <span>Bloquear</span>
+                <span className="hidden sm:inline">Bloquear</span>
               </button>
             )}
           </div>
         </div>
       </header>
 
+      {/* Floating Notice */}
+      {notice && (
+        <div className="fixed top-16 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold border border-slate-700 animate-in slide-in-from-top-2">
+          {notice}
+        </div>
+      )}
+
+      {/* PANTALLA DE BLOQUEO POR PIN */}
       {!isAdminAuthenticated ? (
         <main className="max-w-md mx-auto px-4 py-16">
           <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl text-center space-y-6">
@@ -290,7 +350,7 @@ export default function AdminPage() {
                 DonDomi Control Central
               </h2>
               <p className="text-xs text-slate-500">
-                Ingresa el PIN Maestro para gestionar restaurantes, comisiones y configuración en Valledupar.
+                Ingresa el PIN Maestro para gestionar categorías, afiliados y la red en Valledupar.
               </p>
             </div>
 
@@ -332,662 +392,576 @@ export default function AdminPage() {
           </div>
         </main>
       ) : (
-        <>
-          <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        {/* Banner onboarding target */}
-        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-orange-950 rounded-3xl p-5 text-white shadow-lg border border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 bg-orange-500/20 text-orange-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-orange-500/30">
-              <span>Etapa 1: Validación Comercial Valledupar</span>
+        /* PANTALLA PRINCIPAL DESBLOQUEADA */
+        <main className="max-w-6xl mx-auto px-4 py-4 space-y-5">
+          {/* 3 Metric Cards */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Restaurantes en Red
+              </span>
+              <span className="text-2xl font-black text-slate-900 mt-1 block">
+                {restaurants.length}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Afiliados en Valledupar</span>
             </div>
-            <h2 className="text-lg sm:text-xl font-black">
-              Meta Inicial: 15–20 Restaurantes Afiliados
-            </h2>
-            <p className="text-xs text-slate-300 max-w-xl">
-              Actualmente tienes {restaurants.length} restaurantes configurados en el sistema con menús textuales listos para validar el mercado.
-            </p>
+
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Pedidos Totales
+              </span>
+              <span className="text-2xl font-black text-orange-600 mt-1 block">
+                {deliveredCount}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Entregados con éxito</span>
+            </div>
+
+            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Flota de Repartidores
+              </span>
+              <span className="text-2xl font-black text-blue-600 mt-1 block">
+                {drivers.length}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Domiciliarios registrados</span>
+            </div>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 text-center min-w-[140px]">
-            <span className="text-2xl font-black text-orange-400">
-              {restaurants.length} / 20
-            </span>
-            <span className="text-[11px] text-slate-300 block font-medium">
-              Progreso Meta MVP
-            </span>
-            <div className="w-full bg-slate-700 rounded-full h-1.5 mt-2 overflow-hidden">
-              <div
-                className="bg-orange-500 h-full rounded-full"
-                style={{ width: `${Math.min(100, (restaurants.length / 20) * 100)}%` }}
-              ></div>
-            </div>
-          </div>
-        </div>
+          {/* Tab Navigation */}
+          <div className="bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-5 gap-1 text-xs font-bold">
+            <button
+              onClick={() => setActiveTab('CATEGORIAS')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
+                activeTab === 'CATEGORIAS'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Categorías ({categories.length})</span>
+            </button>
 
-        {/* 4 Metric Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Restaurantes</span>
-              <div className="w-8 h-8 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center">
-                <Store className="w-4 h-4" />
+            <button
+              onClick={() => setActiveTab('RESTAURANTES')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
+                activeTab === 'RESTAURANTES'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Store className="w-4 h-4" />
+              <span>Restaurantes ({restaurants.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('DOMICILIARIOS')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
+                activeTab === 'DOMICILIARIOS'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Bike className="w-4 h-4" />
+              <span>Domiciliarios ({drivers.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('PEDIDOS')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
+                activeTab === 'PEDIDOS'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span>Torre de Pedidos</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('AJUSTES')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
+                activeTab === 'AJUSTES'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              <span>Ajustes & Tarifa</span>
+            </button>
+          </div>
+
+          {/* ============================================================== */}
+          {/* TAB 1: GESTIÓN DE CATEGORÍAS ("¿Qué se te antoja hoy?") */}
+          {/* ============================================================== */}
+          {activeTab === 'CATEGORIAS' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Categorías de Comida en Valledupar
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Aparecen en el carrusel de la página principal bajo &quot;¿Qué se te antoja hoy?&quot;.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleOpenAddCategory}
+                  className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-orange-600/20"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Crear Categoría</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {categories.map((cat) => (
+                  <div
+                    key={cat.id}
+                    className="bg-white rounded-3xl p-4 border border-slate-200 shadow-xs flex flex-col justify-between gap-3 group hover:border-orange-300 transition"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="w-12 h-12 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center text-2xl shadow-inner">
+                        {cat.icon}
+                      </div>
+                      {cat.badge && (
+                        <span className="text-[10px] font-black uppercase tracking-wider text-orange-600 bg-orange-100/70 px-2 py-0.5 rounded-full">
+                          {cat.badge}
+                        </span>
+                      )}
+                    </div>
+
+                    <div>
+                      <h4 className="font-black text-sm text-slate-900">{cat.name}</h4>
+                      <p className="text-[11px] text-slate-400 font-mono">slug: {cat.slug}</p>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-1 pt-2 border-t border-slate-100">
+                      <button
+                        onClick={() => handleOpenEditCategory(cat)}
+                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                        title="Editar categoría"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCategory(cat.id, cat.name)}
+                        className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition"
+                        title="Eliminar categoría"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="text-2xl font-black text-slate-900">{restaurants.length}</div>
-            <p className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              {restaurants.filter((r) => r.isOpen).length} abiertos ahora
-            </p>
-          </div>
+          )}
 
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Pedidos Totales</span>
-              <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                <ShoppingBag className="w-4 h-4" />
+          {/* ============================================================== */}
+          {/* TAB 2: DIRECTORIO Y AFILIACIÓN DE RESTAURANTES */}
+          {/* ============================================================== */}
+          {activeTab === 'RESTAURANTES' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Restaurantes Afiliados ({restaurants.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Cada restaurante administra de forma autónoma su propio menú desde su panel.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setIsAddRestModalOpen(true)}
+                  className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-orange-600/20"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Afiliar Restaurante</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {restaurants.map((rest) => (
+                  <div
+                    key={rest.id}
+                    className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col justify-between gap-3"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                        <div>
+                          <h4 className="font-black text-base text-slate-900">{rest.name}</h4>
+                          <p className="text-xs text-slate-500">{rest.neighborhood} · Valledupar</p>
+                        </div>
+
+                        <button
+                          onClick={() => toggleRestaurantStatus(rest.id)}
+                          className={`px-3 py-1 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
+                            rest.isOpen
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              rest.isOpen ? 'bg-emerald-600' : 'bg-red-600'
+                            }`}
+                          ></span>
+                          <span>{rest.isOpen ? 'Activo' : 'Pausado'}</span>
+                        </button>
+                      </div>
+
+                      <div className="pt-2 space-y-1 text-xs text-slate-600">
+                        <p><strong>Teléfono:</strong> {rest.phone}</p>
+                        <p><strong>Correo acceso:</strong> {rest.email || `${rest.slug}@dondomi.com`}</p>
+                        <p><strong>Comisión DonDomi:</strong> {rest.commissionRate}% pactada</p>
+                        <p><strong>Horario:</strong> {rest.openingHours}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                      <Link
+                        href={`/restaurant/${rest.id}`}
+                        target="_blank"
+                        className="text-orange-600 font-bold hover:underline flex items-center gap-1"
+                      >
+                        <span>Ver menú público</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </Link>
+
+                      <span className="text-[11px] text-slate-400">PIN Cocina: {rest.pin || '1234'}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="text-2xl font-black text-slate-900">{orders.length}</div>
-            <p className="text-[11px] text-blue-600 font-semibold">
-              {orders.filter((o) => o.status !== 'DELIVERED').length} en curso
-            </p>
-          </div>
+          )}
 
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Ventas Totales</span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
+          {/* ============================================================== */}
+          {/* TAB 3: FLOTA DE DOMICILIARIOS */}
+          {/* ============================================================== */}
+          {activeTab === 'DOMICILIARIOS' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Flota de Domiciliarios ({drivers.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Repartidores autorizados para tomar carreras con tarifa fija de $7.000 COP en Valledupar.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setIsAddDriverModalOpen(true)}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-blue-600/20"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Registrar Domiciliario</span>
+                </button>
               </div>
-            </div>
-            <div className="text-2xl font-black text-slate-900">{formatCOP(totalSales)}</div>
-            <p className="text-[11px] text-slate-500">Subtotal + Domicilios</p>
-          </div>
 
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Comisión DonDomi</span>
-              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-                <TrendingUp className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="text-2xl font-black text-amber-600">{formatCOP(totalCommissions)}</div>
-            <p className="text-[11px] text-slate-500">0% a 10% máx (Fase 1 gratuita)</p>
-          </div>
-        </div>
-
-        {/* Tab Navigation */}
-        <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
-          <button
-            onClick={() => setActiveTab('RESTAURANTES')}
-            className={`px-4 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'RESTAURANTES'
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
-            }`}
-          >
-            <Store className="w-3.5 h-3.5" />
-            <span>Restaurantes ({restaurants.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('PEDIDOS')}
-            className={`px-4 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'PEDIDOS'
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
-            }`}
-          >
-            <ShoppingBag className="w-3.5 h-3.5" />
-            <span>Monitoreo de Pedidos ({orders.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('TARIFAS')}
-            className={`px-4 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'TARIFAS'
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
-            }`}
-          >
-            <MapPin className="w-3.5 h-3.5" />
-            <span>Zonas & Tarifas Valledupar</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('ARQUITECTURA')}
-            className={`px-4 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'ARQUITECTURA'
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
-            }`}
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span>Arquitectura & Base de Datos</span>
-          </button>
-        </div>
-
-        {/* TAB 1: RESTAURANTES */}
-        {activeTab === 'RESTAURANTES' && (
-          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-2xs space-y-4 p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">
-                  Restaurantes Aliados en Valledupar
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Registra restaurantes en tus visitas comerciales y gestiona sus menús textuales con adiciones.
-                </p>
-              </div>
-              <button
-                onClick={() => setIsAddRestModalOpen(true)}
-                className="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Afiliar Nuevo Restaurante</span>
-              </button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
-                    <th className="p-3">Restaurante</th>
-                    <th className="p-3">Barrio / Dirección</th>
-                    <th className="p-3">WhatsApp Pedidos</th>
-                    <th className="p-3">Comisión</th>
-                    <th className="p-3">Estado</th>
-                    <th className="p-3 text-right">Menú & Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {restaurants.map((r) => {
-                    const dishCount = (productsByRestaurant[r.id] || []).length;
-                    return (
-                      <tr key={r.id} className="hover:bg-slate-50/80 transition">
-                        <td className="p-3">
-                          <div className="flex items-center gap-2.5">
-                            <img
-                              src={r.logoUrl}
-                              alt=""
-                              className="w-9 h-9 rounded-xl object-cover border border-slate-200"
-                            />
-                            <div>
-                              <span className="font-extrabold text-slate-900 block">{r.name}</span>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                <span className="text-[11px] text-slate-400">{r.tags[0]}</span>
-                                <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded border border-slate-200">
-                                  PIN: {r.pin || '1234'}
-                                </span>
-                              </div>
-                            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {drivers.map((drv) => (
+                  <div
+                    key={drv.id}
+                    className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col justify-between gap-3"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center font-black">
+                            <Bike className="w-5 h-5" />
                           </div>
-                        </td>
-                        <td className="p-3">
-                          <span className="font-medium text-slate-700 block">{r.neighborhood}</span>
-                          <span className="text-[11px] text-slate-400">{r.address}</span>
-                        </td>
-                        <td className="p-3">
-                          <span className="font-mono text-slate-700">{r.phone}</span>
-                        </td>
-                        <td className="p-3">
-                          <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">
-                            {r.commissionRate}%
+                          <div>
+                            <h4 className="font-black text-sm text-slate-900">{drv.name}</h4>
+                            <p className="text-xs text-slate-500">{drv.phone} · Placa: {drv.plate}</p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => toggleDriverStatus(drv.id)}
+                          className={`px-3 py-1 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
+                            drv.isActive
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              drv.isActive ? 'bg-emerald-600' : 'bg-red-600'
+                            }`}
+                          ></span>
+                          <span>{drv.isActive ? 'Activo' : 'Inactivo'}</span>
+                        </button>
+                      </div>
+
+                      <div className="pt-2 text-xs text-slate-600 space-y-1">
+                        <p><strong>Correo acceso:</strong> {drv.email}</p>
+                        <p><strong>Carreras realizadas:</strong> {drv.totalDeliveries}</p>
+                        <p><strong>Calificación:</strong> ★ {drv.rating}</p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <a
+                        href={`https://wa.me/57${drv.phone.replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-emerald-600 font-bold hover:underline"
+                      >
+                        Contactar WhatsApp
+                      </a>
+                      <span className="text-[11px] text-slate-400">Contraseña: domi1234</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 4: TORRE DE CONTROL DE PEDIDOS EN VIVO */}
+          {/* ============================================================== */}
+          {activeTab === 'PEDIDOS' && (
+            <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Torre de Control de Pedidos ({orders.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Supervisa todas las órdenes en curso o cancela pedidos en caso de conflicto.
+                  </p>
+                </div>
+              </div>
+
+              {orders.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">No hay pedidos registrados.</p>
+              ) : (
+                <div className="divide-y divide-slate-100 text-xs">
+                  {orders.map((o) => (
+                    <div key={o.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-slate-900 text-sm">{o.orderNumber}</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="font-bold text-slate-700">{o.restaurantName}</span>
+                        </div>
+                        <p className="text-slate-500 mt-0.5">
+                          Cliente: {o.customerName} ({o.customerPhone}) · {o.deliveryAddress.neighborhood}
+                        </p>
+                        {o.driverName && (
+                          <p className="text-blue-600 font-semibold text-[11px]">
+                            Repartidor asignado: {o.driverName}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <span className="font-black text-slate-900 text-sm block">
+                            {formatCOP(o.total)}
                           </span>
-                        </td>
-                        <td className="p-3">
-                          <button
-                            onClick={() => toggleRestaurantStatus(r.id)}
-                            className={`px-2.5 py-1 rounded-full font-bold text-[11px] transition ${
-                              r.isOpen
-                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              o.status === 'DELIVERED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : o.status === 'CANCELLED'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-amber-100 text-amber-800'
                             }`}
                           >
-                            {r.isOpen ? 'Abierto' : 'Cerrado'}
-                          </button>
-                        </td>
-                        <td className="p-3 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => {
-                                setMenuModalRest(r);
-                                setNewProdCategory(r.tags[0] || 'Platos');
-                              }}
-                              className="inline-flex items-center gap-1 text-slate-700 hover:text-slate-900 font-bold bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition"
-                            >
-                              <UtensilsCrossed className="w-3.5 h-3.5 text-orange-600" />
-                              <span>Menú ({dishCount})</span>
-                            </button>
-                            <Link
-                              href={`/restaurant/${r.id}`}
-                              className="inline-flex items-center gap-1 text-orange-600 hover:text-orange-700 font-bold bg-orange-50 hover:bg-orange-100 px-2 py-1 rounded-lg transition"
-                              title="Ver cómo lo ve el cliente"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+                            {o.status}
+                          </span>
+                        </div>
 
-        {/* TAB 2: PEDIDOS EN VIVO */}
-        {activeTab === 'PEDIDOS' && (
-          <div className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-6 shadow-2xs space-y-4">
-            <div className="pb-3 border-b border-slate-100 flex items-center justify-between">
+                        {o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && (
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`¿Cancelar forzosamente el pedido ${o.orderNumber}?`)) {
+                                updateOrderStatus(o.id, 'CANCELLED');
+                                showNotice(`Pedido ${o.orderNumber} cancelado forzosamente`);
+                              }
+                            }}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold px-2.5 py-1.5 rounded-xl border border-red-200"
+                            title="Cancelar pedido de emergencia"
+                          >
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 5: AJUSTES Y TARIFA GLOBAL DE VALLEDUPAR */}
+          {/* ============================================================== */}
+          {activeTab === 'AJUSTES' && (
+            <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-6">
               <div>
-                <h3 className="text-base font-extrabold text-slate-900">
-                  Monitoreo de Pedidos en Tiempo Real
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Parámetros Globales de DonDomi
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Ciclo de gestión: Pedido → Restaurante → Preparación → Entrega
+                  Controla la tarifa fija de la ciudad y emite comunicados en tiempo real.
                 </p>
               </div>
-              <span className="text-xs font-bold bg-orange-100 text-orange-700 px-3 py-1 rounded-full">
-                {orders.length} Registrados
-              </span>
-            </div>
 
-            <div className="space-y-3">
-              {orders.map((order) => (
-                <div
-                  key={order.id}
-                  className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white transition space-y-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-black text-slate-900 text-sm">#{order.orderNumber}</span>
-                      <span className="text-xs text-slate-400">·</span>
-                      <span className="font-extrabold text-orange-600 text-xs">
-                        {order.restaurantName}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
-                          order.status === 'ON_THE_WAY'
-                            ? 'bg-blue-100 text-blue-700'
-                            : order.status === 'PREPARING'
-                            ? 'bg-amber-100 text-amber-700'
-                            : order.status === 'DELIVERED'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-slate-200 text-slate-700'
-                        }`}
-                      >
-                        {order.status === 'ON_THE_WAY'
-                          ? '🛵 En Camino'
-                          : order.status === 'PREPARING'
-                          ? '👨‍🍳 En Cocina'
-                          : order.status === 'DELIVERED'
-                          ? '✅ Entregado'
-                          : 'Pendiente'}
-                      </span>
-                      <span className="font-black text-slate-900 text-sm">
-                        {formatCOP(order.total)}
-                      </span>
-                    </div>
+              {/* Tarifa fija de Domicilio */}
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-extrabold text-sm text-slate-900">
+                      Tarifa Plana de Domicilio en Valledupar
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Actualmente fijada para todos los pedidos de la plataforma.
+                    </p>
                   </div>
-
-                  {/* Order items summary */}
-                  <div className="text-xs text-slate-700 bg-white p-3 rounded-xl border border-slate-100">
-                    <p className="font-bold text-slate-900">Platos pedidos:</p>
-                    <ul className="list-disc list-inside space-y-1 mt-1 text-slate-600">
-                      {order.items.map((it) => (
-                        <li key={it.id}>
-                          <strong>{it.quantity}x</strong> {it.productName} ({formatCOP(it.subtotal)})
-                          {it.selectedOptions && it.selectedOptions.length > 0 && (
-                            <span className="text-[11px] text-slate-500 block pl-4">
-                              Adiciones: {it.selectedOptions.map((o) => o.itemName).join(', ')}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  {/* Customer and address */}
-                  <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 pt-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-800">{order.customerName}</span>
-                      <span>·</span>
-                      <span className="font-mono text-slate-600">{order.customerPhone}</span>
-                      <span>·</span>
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-orange-600" />
-                        {order.deliveryAddress.neighborhood}, {order.deliveryAddress.street}
-                      </span>
-                    </div>
-
-                    <div className="text-slate-600">
-                      Pago: <span className="font-bold text-slate-800">{order.paymentMethod}</span>
-                    </div>
-                  </div>
+                  <span className="text-xl font-black text-orange-600">
+                    {formatCOP(globalDeliveryFee)}
+                  </span>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {/* TAB 3: TARIFAS & ZONAS */}
-        {activeTab === 'TARIFAS' && (
-          <div className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-6 shadow-2xs space-y-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-extrabold text-slate-900">
-                  Tarifa Plana de Domicilio: $7.000 COP en Todo Valledupar
-                </h3>
-                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                  Fase MVP Activa
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Estrategia de lanzamiento: Para evitar inconsistencias o cobros desfavorables por distancias calculadas entre barrios (ej: de La Nevada a Mayales), el cobro de domicilio es de $7.000 COP estándar para toda la ciudad.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-              <div className="p-4 rounded-2xl bg-orange-50/60 border border-orange-200 space-y-2">
-                <span className="text-xs font-black text-orange-700 block uppercase">
-                  Transparencia Total
-                </span>
-                <p className="text-xs text-slate-600">
-                  Tarifa única para cliente: <strong>$7.000 COP</strong>
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  El cliente sabe exactamente cuánto pagará antes de pedir. Sin sorpresas ni recargos ocultos.
-                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    step={500}
+                    min={3000}
+                    value={globalDeliveryFee}
+                    onChange={(e) => setGlobalDeliveryFee(Number(e.target.value))}
+                    className="w-36 bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                  />
+                  <button
+                    onClick={() => showNotice(`✅ Tarifa plana actualizada a ${formatCOP(globalDeliveryFee)}`)}
+                    className="bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl"
+                  >
+                    Guardar Tarifa
+                  </button>
+                </div>
               </div>
 
-              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200 space-y-2">
-                <span className="text-xs font-black text-amber-800 block uppercase">
-                  Autogestión del Aliado
-                </span>
-                <p className="text-xs text-slate-600">
-                  Ingreso directo al restaurante / domiciliario
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  En la fase 1, el restaurante despacha con su propio personal y liquida el domicilio directamente.
-                </p>
-              </div>
+              {/* Banner de Anuncio Global en la App */}
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-orange-600" />
+                  <h4 className="font-extrabold text-sm text-slate-900">
+                    Banner de Aviso Global (Visible para todos los clientes)
+                  </h4>
+                </div>
 
-              <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200 space-y-2">
-                <span className="text-xs font-black text-blue-800 block uppercase">
-                  Cobertura Total Valledupar
-                </span>
-                <p className="text-xs text-slate-600">
-                  <strong>40+ Barrios</strong> registrados
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  Desde Novalito y Centro hasta La Nevada, Ciudadela 450 Años y Los Cortijos.
-                </p>
+                <textarea
+                  rows={2}
+                  value={globalAnnouncement || ''}
+                  onChange={(e) => setGlobalAnnouncement(e.target.value)}
+                  placeholder="Ej: Lluvias en Valledupar: los tiempos de entrega pueden presentar demoras de 10-15 minutos."
+                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                ></textarea>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (globalAnnouncement) {
+                        showNotice('📢 Aviso global publicado en la App');
+                      } else {
+                        showNotice('Aviso global retirado');
+                      }
+                    }}
+                    className="bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs px-4 py-2 rounded-xl"
+                  >
+                    Guardar Comunicado
+                  </button>
+                  {globalAnnouncement && (
+                    <button
+                      onClick={() => {
+                        setGlobalAnnouncement(null);
+                        showNotice('Aviso global retirado');
+                      }}
+                      className="bg-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-xl"
+                    >
+                      Quitar Aviso
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
+          )}
+        </main>
+      )}
 
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-              <span>💡 Cobertura abierta: los clientes escriben directamente su barrio y nomenclatura sin restricciones.</span>
-              <span className="font-semibold text-orange-600">Tarifa única $7.000 COP</span>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: ARQUITECTURA */}
-        {activeTab === 'ARQUITECTURA' && (
-          <div className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-6 shadow-2xs space-y-5">
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900">
-                Arquitectura del Sistema & Decisiones del MVP
+      {/* ============================================================== */}
+      {/* MODAL CREAR / EDITAR CATEGORÍA */}
+      {/* ============================================================== */}
+      {isCategoryModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <h3 className="font-black text-base text-slate-900">
+                {editingCategory ? 'Editar Categoría' : 'Nueva Categoría de Comida'}
               </h3>
-              <p className="text-xs text-slate-500">
-                Estructura modular orientada a afiliar rápidamente restaurantes sin fricciones tecnológicas.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                <span className="font-bold text-slate-900 block text-sm">
-                  1. Menús Textuales & Sin Fricción Visual
-                </span>
-                <p className="text-slate-600">
-                  Para permitir la entrada de restaurantes pequeños que no tienen fotos profesionales ni diseño gráfico, los menús son 100% textuales pero muy descriptivos, con soporte completo para categorías, adiciones y notas.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                <span className="font-bold text-slate-900 block text-sm">
-                  2. Tipografía Institucional Garantizada
-                </span>
-                <p className="text-slate-600">
-                  Se integró la fuente <strong>Plus Jakarta Sans</strong> directamente en la aplicación. No depende de las fuentes del teléfono móvil, evitando que fuentes extrañas o modificadas degraden la presentación de la plataforma.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                <span className="font-bold text-slate-900 block text-sm">
-                  3. Acceso Separado por Enlace
-                </span>
-                <p className="text-slate-600">
-                  La experiencia del cliente es 100% limpia sin botones visibles hacia los portales privados. El administrador, restaurantes y domiciliarios acceden mediante sus propias rutas: <code>/admin</code>, <code>/merchant</code> y <code>/driver</code>.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                <span className="font-bold text-slate-900 block text-sm">
-                  4. Despacho Directo & Notificación a WhatsApp
-                </span>
-                <p className="text-slate-600">
-                  En esta primera fase los restaurantes gestionan sus propios domiciliarios. Al confirmar el pedido, el sistema genera automáticamente el mensaje estructurado con un botón para enviar copia directa al WhatsApp del restaurante.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* MODAL 1: AFILIAR NUEVO RESTAURANTE */}
-      {isAddRestModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center">
-                  <Store className="w-4 h-4" />
-                </div>
-                <h3 className="font-bold text-slate-900 text-sm">Afiliar Nuevo Restaurante</h3>
-              </div>
               <button
-                onClick={() => setIsAddRestModalOpen(false)}
-                className="w-8 h-8 rounded-full bg-slate-200/70 hover:bg-slate-300 text-slate-600 flex items-center justify-center transition"
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateRestaurant} className="p-5 overflow-y-auto space-y-3.5 text-xs">
+            <form onSubmit={handleSaveCategory} className="space-y-3.5">
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Nombre comercial del restaurante *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre de la Categoría</label>
                 <input
                   type="text"
                   required
-                  placeholder="Ej: Asados & Parrilla El Cacique"
-                  value={newRestName}
-                  onChange={(e) => setNewRestName(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
+                  value={catName}
+                  onChange={(e) => setCatName(e.target.value)}
+                  placeholder="Ej: Salchipapas, Desgranados, Parrilla"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Barrio en Valledupar *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej: Novalito, La Nevada, Centro, Los Cortijos..."
-                    value={newRestNeighborhood}
-                    onChange={(e) => setNewRestNeighborhood(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">WhatsApp de Pedidos *</label>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="Ej: 300 456 7890"
-                    value={newRestPhone}
-                    onChange={(e) => setNewRestPhone(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
-                  />
-                </div>
-              </div>
-
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Dirección física exacta *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Ícono (Emoji)</label>
                 <input
                   type="text"
                   required
-                  placeholder="Ej: Calle 14 # 9-45"
-                  value={newRestAddress}
-                  onChange={(e) => setNewRestAddress(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
+                  value={catIcon}
+                  onChange={(e) => setCatIcon(e.target.value)}
+                  placeholder="🍟"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-base text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 text-center"
                 />
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Horario</label>
-                  <input
-                    type="text"
-                    value={newRestHours}
-                    onChange={(e) => setNewRestHours(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Domicilio Base</label>
-                  <input
-                    type="number"
-                    value={newRestBaseFee}
-                    onChange={(e) => setNewRestBaseFee(Number(e.target.value))}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Comisión % (0-10)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={10}
-                    value={newRestCommission}
-                    onChange={(e) => setNewRestCommission(Number(e.target.value))}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs font-bold text-orange-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">PIN Cocina *</label>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    value={newRestPin}
-                    onChange={(e) => setNewRestPin(e.target.value)}
-                    placeholder="1234"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 text-xs font-mono font-bold"
-                  />
-                </div>
-              </div>
-
-              {/* Payment methods checkboxes */}
-              <div className="space-y-1.5 pt-1">
-                <label className="font-bold text-slate-700 block text-xs">
-                  Métodos de pago habilitados para este restaurante:
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
-                    <input
-                      type="checkbox"
-                      checked={acceptsCash}
-                      onChange={(e) => setAcceptsCash(e.target.checked)}
-                      className="rounded text-orange-600 focus:ring-orange-500"
-                    />
-                    <span className="font-semibold text-slate-800">💵 Efectivo</span>
-                  </label>
-                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
-                    <input
-                      type="checkbox"
-                      checked={acceptsNequi}
-                      onChange={(e) => setAcceptsNequi(e.target.checked)}
-                      className="rounded text-orange-600 focus:ring-orange-500"
-                    />
-                    <span className="font-semibold text-slate-800">💜 Nequi</span>
-                  </label>
-                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
-                    <input
-                      type="checkbox"
-                      checked={acceptsBreb}
-                      onChange={(e) => setAcceptsBreb(e.target.checked)}
-                      className="rounded text-orange-600 focus:ring-orange-500"
-                    />
-                    <span className="font-semibold text-slate-800">⚡ Llave Bre-B</span>
-                  </label>
-                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
-                    <input
-                      type="checkbox"
-                      checked={acceptsDaviplata}
-                      onChange={(e) => setAcceptsDaviplata(e.target.checked)}
-                      className="rounded text-orange-600 focus:ring-orange-500"
-                    />
-                    <span className="font-semibold text-slate-800">🔴 Daviplata</span>
-                  </label>
-                  <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs hover:bg-slate-100 transition">
-                    <input
-                      type="checkbox"
-                      checked={acceptsCard}
-                      onChange={(e) => setAcceptsCard(e.target.checked)}
-                      className="rounded text-orange-600 focus:ring-orange-500"
-                    />
-                    <span className="font-semibold text-slate-800">💳 Tarjeta (Wompi)</span>
-                  </label>
-                </div>
-              </div>
-
               <div>
-                <label className="font-bold text-slate-700 block mb-1">Categorías / Etiquetas (separadas por coma)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Insignia / Badge (Opcional)</label>
                 <input
                   type="text"
-                  placeholder="Ej: Salchipapas, Desgranados, Comida Rápida"
-                  value={newRestTags}
-                  onChange={(e) => setNewRestTags(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
+                  value={catBadge}
+                  onChange={(e) => setCatBadge(e.target.value)}
+                  placeholder="Ej: Top Valle, Nuevo, Típico"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
 
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">Descripción breve del negocio</label>
-                <textarea
-                  rows={2}
-                  placeholder="Sazón casera con carnes al carbón y patacones con queso costeño..."
-                  value={newRestDescription}
-                  onChange={(e) => setNewRestDescription(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500"
-                />
-              </div>
-
-              <div className="pt-2">
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCategoryModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100"
+                >
+                  Cancelar
+                </button>
                 <button
                   type="submit"
-                  className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-3 rounded-2xl shadow-md transition text-xs"
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md"
                 >
-                  Registrar Restaurante en DonDomi
+                  Guardar Categoría
                 </button>
               </div>
             </form>
@@ -995,161 +969,174 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* MODAL 2: GESTIONAR MENÚ TEXTUAL DEL RESTAURANTE */}
-      {menuModalRest && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <div>
-                <h3 className="font-bold text-slate-900 text-sm">
-                  Menú Textual: {menuModalRest.name}
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  Agrega platos con categorías y adiciones (sin requerir imágenes).
-                </p>
-              </div>
+      {/* ============================================================== */}
+      {/* MODAL AFILIAR RESTAURANTE */}
+      {/* ============================================================== */}
+      {isAddRestModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <h3 className="font-black text-base text-slate-900">Afiliar Nuevo Restaurante</h3>
               <button
-                onClick={() => setMenuModalRest(null)}
-                className="w-8 h-8 rounded-full bg-slate-200/70 hover:bg-slate-300 text-slate-600 flex items-center justify-center transition"
+                onClick={() => setIsAddRestModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-6 flex-1 text-xs">
-              {/* Formulario para agregar nuevo plato */}
-              <form onSubmit={handleAddProduct} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                <span className="font-extrabold text-slate-900 block text-xs">
-                  + Agregar Nuevo Plato al Menú
-                </span>
+            <form onSubmit={handleAddRestaurant} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre del Restaurante</label>
+                <input
+                  type="text"
+                  required
+                  value={newRestName}
+                  onChange={(e) => setNewRestName(e.target.value)}
+                  placeholder="Ej: Asados del Valle"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="font-bold text-slate-700 block mb-1">Nombre del Plato *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ej: Pechuga a la Plancha con Queso Costeño"
-                      value={newProdName}
-                      onChange={(e) => setNewProdName(e.target.value)}
-                      className="w-full p-2 bg-white border border-slate-200 rounded-xl focus:outline-none"
-                    />
-                  </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Barrio en Valledupar</label>
+                <input
+                  type="text"
+                  required
+                  value={newRestNeighborhood}
+                  onChange={(e) => setNewRestNeighborhood(e.target.value)}
+                  placeholder="Ej: Novalito, Los Cortijos, Centro"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
 
-                  <div>
-                    <label className="font-bold text-slate-700 block mb-1">Categoría del Menú *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ej: Platos Fuertes, Combos, Bebidas"
-                      value={newProdCategory}
-                      onChange={(e) => setNewProdCategory(e.target.value)}
-                      className="w-full p-2 bg-white border border-slate-200 rounded-xl focus:outline-none"
-                    />
-                  </div>
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Dirección Exacta</label>
+                <input
+                  type="text"
+                  required
+                  value={newRestAddress}
+                  onChange={(e) => setNewRestAddress(e.target.value)}
+                  placeholder="Ej: Calle 9 # 6-30"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-1">
-                    <label className="font-bold text-slate-700 block mb-1">Precio COP *</label>
-                    <input
-                      type="number"
-                      required
-                      placeholder="24000"
-                      value={newProdPrice}
-                      onChange={(e) => setNewProdPrice(Number(e.target.value))}
-                      className="w-full p-2 bg-white border border-slate-200 rounded-xl focus:outline-none"
-                    />
-                  </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Celular / WhatsApp</label>
+                <input
+                  type="text"
+                  required
+                  value={newRestPhone}
+                  onChange={(e) => setNewRestPhone(e.target.value)}
+                  placeholder="300 123 4567"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
 
-                  <div className="col-span-2">
-                    <label className="font-bold text-slate-700 block mb-1">
-                      Adiciones extras (Nombre: Precio, separado por comas)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Papas: 4000, Suero: 2500, Queso: 3500"
-                      value={newProdAdditions}
-                      onChange={(e) => setNewProdAdditions(e.target.value)}
-                      className="w-full p-2 bg-white border border-slate-200 rounded-xl focus:outline-none"
-                    />
-                  </div>
-                </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Comisión Pactada (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={25}
+                  value={newRestCommission}
+                  onChange={(e) => setNewRestCommission(Number(e.target.value))}
+                  placeholder="0 (gratis primeros meses) o 10%"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
 
-                <div>
-                  <label className="font-bold text-slate-700 block mb-1">Descripción detallada</label>
-                  <textarea
-                    rows={2}
-                    placeholder="Tierna pechuga sellada al carbón, servida con patacón pisao, suero y ensalada verde..."
-                    value={newProdDesc}
-                    onChange={(e) => setNewProdDesc(e.target.value)}
-                    className="w-full p-2 bg-white border border-slate-200 rounded-xl focus:outline-none"
-                  />
-                </div>
-
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddRestModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100"
+                >
+                  Cancelar
+                </button>
                 <button
                   type="submit"
-                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-4 py-2 rounded-xl transition text-xs"
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md"
                 >
-                  Guardar Plato en el Menú
+                  Afiliar Restaurante
                 </button>
-              </form>
-
-              {/* Lista actual de platos del restaurante */}
-              <div className="space-y-2">
-                <span className="font-extrabold text-slate-900 block text-xs">
-                  Platos Actuales en el Menú ({(productsByRestaurant[menuModalRest.id] || []).length})
-                </span>
-
-                <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl bg-white overflow-hidden">
-                  {(productsByRestaurant[menuModalRest.id] || []).length === 0 ? (
-                    <div className="p-4 text-center text-slate-400">
-                      Este restaurante todavía no tiene platos en su menú.
-                    </div>
-                  ) : (
-                    (productsByRestaurant[menuModalRest.id] || []).map((prod) => (
-                      <div key={prod.id} className="p-3 flex items-start justify-between gap-3 hover:bg-slate-50">
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-900">{prod.name}</span>
-                            <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
-                              {prod.categoryName}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 line-clamp-2">{prod.description}</p>
-                          <span className="font-black text-orange-600 block">{formatCOP(prod.price)}</span>
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleDuplicateProduct(prod)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-orange-600 hover:bg-orange-50 transition"
-                            title="Duplicar plato rápidamente"
-                          >
-                            <Copy className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (confirm(`¿Eliminar "${prod.name}" del menú?`)) {
-                                deleteProduct(menuModalRest.id, prod.id);
-                              }
-                            }}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition"
-                            title="Eliminar plato"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
-        </>
+
+      {/* ============================================================== */}
+      {/* MODAL REGISTRAR DOMICILIARIO */}
+      {/* ============================================================== */}
+      {isAddDriverModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <h3 className="font-black text-base text-slate-900">Registrar Domiciliario</h3>
+              <button
+                onClick={() => setIsAddDriverModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddDriver} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre Completo</label>
+                <input
+                  type="text"
+                  required
+                  value={newDriverName}
+                  onChange={(e) => setNewDriverName(e.target.value)}
+                  placeholder="Ej: Andrés Pardo"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Celular</label>
+                <input
+                  type="text"
+                  required
+                  value={newDriverPhone}
+                  onChange={(e) => setNewDriverPhone(e.target.value)}
+                  placeholder="300 987 6543"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Placa de la Moto</label>
+                <input
+                  type="text"
+                  value={newDriverPlate}
+                  onChange={(e) => setNewDriverPlate(e.target.value)}
+                  placeholder="Ej: ABC-45D"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddDriverModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md"
+                >
+                  Registrar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

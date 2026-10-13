@@ -1,8 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserRole, User, Product, SelectedOption, Restaurant, Order, OrderStatus } from '@/types';
-import { RESTAURANTS as INITIAL_RESTAURANTS, PRODUCTS_BY_RESTAURANT as INITIAL_PRODUCTS, MOCK_ORDERS as INITIAL_ORDERS } from '@/data/mockData';
+import { UserRole, User, Product, SelectedOption, Restaurant, Order, OrderStatus, FoodCategory, Driver } from '@/types';
+import { FOOD_CATEGORIES, INITIAL_DRIVERS, RESTAURANTS as INITIAL_RESTAURANTS, PRODUCTS_BY_RESTAURANT as INITIAL_PRODUCTS, MOCK_ORDERS as INITIAL_ORDERS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
 import { dbToRestaurant, restaurantToDb, dbToProduct, productToDb } from '@/lib/mappers';
 
@@ -18,6 +18,7 @@ export interface CartItem {
 interface AppContextType {
   // Autenticación Real de la Plataforma
   currentUser: User | null;
+  loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
   loginAsAdmin: (pin: string) => Promise<{ success: boolean; error?: string }>;
   loginAsRestaurant: (restaurantId: string, pin: string) => Promise<{ success: boolean; error?: string }>;
   loginAsDriver: (name: string, phone: string, pin: string) => Promise<{ success: boolean; error?: string }>;
@@ -58,6 +59,23 @@ interface AppContextType {
   onlyOpenFilter: boolean;
   setOnlyOpenFilter: (onlyOpen: boolean) => void;
 
+  // Categorías de comida de Valledupar ("¿Qué se te antoja hoy?")
+  categories: FoodCategory[];
+  addCategory: (category: FoodCategory) => void;
+  updateCategory: (category: FoodCategory) => void;
+  deleteCategory: (categoryId: string) => void;
+
+  // Ajustes de Plataforma DonDomi
+  globalDeliveryFee: number;
+  setGlobalDeliveryFee: (fee: number) => void;
+  globalAnnouncement: string | null;
+  setGlobalAnnouncement: (announcement: string | null) => void;
+
+  // Flota de Domiciliarios
+  drivers: Driver[];
+  addDriver: (driver: Driver) => void;
+  toggleDriverStatus: (driverId: string) => void;
+
   // Restaurantes en la nube (Supabase)
   restaurants: Restaurant[];
   addRestaurant: (newRestaurant: Restaurant) => Promise<void>;
@@ -67,6 +85,7 @@ interface AppContextType {
   // Menús y Platos (100% textuales con adiciones)
   productsByRestaurant: Record<string, Product[]>;
   addProduct: (restaurantId: string, newProduct: Product) => Promise<void>;
+  updateProduct: (restaurantId: string, updatedProduct: Product) => Promise<void>;
   deleteProduct: (restaurantId: string, productId: string) => Promise<void>;
   toggleProductAvailability: (restaurantId: string, productId: string) => Promise<void>;
 
@@ -95,6 +114,113 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [productsByRestaurant, setProductsByRestaurant] = useState<Record<string, Product[]>>(INITIAL_PRODUCTS);
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
 
+  // Categorías de la ciudad ("¿Qué se te antoja hoy?")
+  const [categories, setCategories] = useState<FoodCategory[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dondomi_categories');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return FOOD_CATEGORIES;
+  });
+
+  const addCategory = (newCat: FoodCategory) => {
+    setCategories((prev) => {
+      const updated = [...prev, newCat];
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_categories', JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
+  const updateCategory = (cat: FoodCategory) => {
+    setCategories((prev) => {
+      const updated = prev.map((c) => (c.id === cat.id ? cat : c));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_categories', JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
+  const deleteCategory = (catId: string) => {
+    setCategories((prev) => {
+      const updated = prev.filter((c) => c.id !== catId);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_categories', JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
+  // Ajustes Globales de Plataforma
+  const [globalDeliveryFee, setGlobalDeliveryFeeState] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dondomi_global_delivery_fee');
+      if (saved) return Number(saved) || 7000;
+    }
+    return 7000;
+  });
+
+  const setGlobalDeliveryFee = (fee: number) => {
+    setGlobalDeliveryFeeState(fee);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dondomi_global_delivery_fee', String(fee));
+    }
+  };
+
+  const [globalAnnouncement, setGlobalAnnouncementState] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('dondomi_global_announcement') || null;
+    }
+    return null;
+  });
+
+  const setGlobalAnnouncement = (ann: string | null) => {
+    setGlobalAnnouncementState(ann);
+    if (typeof window !== 'undefined') {
+      if (ann) localStorage.setItem('dondomi_global_announcement', ann);
+      else localStorage.removeItem('dondomi_global_announcement');
+    }
+  };
+
+  // Flota de Domiciliarios
+  const [drivers, setDrivers] = useState<Driver[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dondomi_drivers');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return INITIAL_DRIVERS;
+  });
+
+  const addDriver = (driver: Driver) => {
+    setDrivers((prev) => {
+      const updated = [driver, ...prev];
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_drivers', JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
+  const toggleDriverStatus = (driverId: string) => {
+    setDrivers((prev) => {
+      const updated = prev.map((d) => (d.id === driverId ? { ...d, isActive: !d.isActive } : d));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_drivers', JSON.stringify(updated));
+      }
+      return updated;
+    });
+  };
+
   // Autenticación Real de la Plataforma
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
@@ -112,6 +238,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.error('Error restaurando sesión:', err);
       }
     }
+  }, []);
+
+  // Cancelación automática de pedidos PENDING tras 15 minutos de inactividad
+  useEffect(() => {
+    const PENDING_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutos
+
+    const checkPendingOrders = () => {
+      const now = Date.now();
+      setOrders((prev) => {
+        let hasChanges = false;
+        const updated = prev.map((ord) => {
+          if (
+            ord.status === 'PENDING' &&
+            now - new Date(ord.createdAt).getTime() > PENDING_TIMEOUT_MS
+          ) {
+            hasChanges = true;
+            supabase
+              .from('orders')
+              .update({ status: 'CANCELLED' })
+              .eq('id', ord.id)
+              .then(({ error }: { error: any }) => {
+                if (error) console.warn('Error auto-cancelando pedido:', error);
+              });
+
+            return { ...ord, status: 'CANCELLED' as OrderStatus };
+          }
+          return ord;
+        });
+
+        return hasChanges ? updated : prev;
+      });
+    };
+
+    checkPendingOrders();
+    const interval = setInterval(checkPendingOrders, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // Cargar datos iniciales desde Supabase
@@ -443,6 +605,137 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Actualizar plato para un restaurante
+  const updateProduct = async (restaurantId: string, updatedProduct: Product) => {
+    setProductsByRestaurant((prev) => {
+      const current = prev[restaurantId] || [];
+      return {
+        ...prev,
+        [restaurantId]: current.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)),
+      };
+    });
+
+    try {
+      const dbRow = productToDb(updatedProduct);
+      await supabase.from('products').upsert([dbRow]);
+    } catch (err) {
+      console.warn('Error actualizando plato en Supabase:', err);
+    }
+  };
+
+  // Login inteligente universal con correo y contraseña
+  const loginWithEmail = async (
+    email: string,
+    pass: string
+  ): Promise<{ success: boolean; role?: UserRole; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = pass.trim();
+
+    if (!cleanEmail || !cleanPass) {
+      return { success: false, error: 'Por favor ingresa tu correo y contraseña.' };
+    }
+
+    // 1. Detección Administrador
+    if (cleanEmail === 'admin@dondomi.com' || cleanEmail === 'admin@valledupar.com') {
+      if (cleanPass !== 'admin2026' && cleanPass !== '2026') {
+        return { success: false, error: 'Contraseña de Administrador incorrecta.' };
+      }
+      const user: User = {
+        id: 'admin-master',
+        name: 'Administrador DonDomi',
+        email: cleanEmail,
+        role: 'ADMINISTRADOR',
+        createdAt: new Date().toISOString(),
+      };
+      setCurrentUser(user);
+      setActiveRole('ADMINISTRADOR');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_auth_user', JSON.stringify(user));
+        sessionStorage.setItem('admin_master_auth', 'true');
+      }
+      return { success: true, role: 'ADMINISTRADOR' };
+    }
+
+    // 2. Detección Restaurante (por email registrado o por nombre/slug)
+    const foundRest = restaurants.find(
+      (r) =>
+        (r.email && r.email.toLowerCase() === cleanEmail) ||
+        r.name.toLowerCase().replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail ||
+        r.slug.replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail
+    );
+
+    if (foundRest) {
+      const expectedPin = foundRest.pin || '1234';
+      if (cleanPass !== 'cocina1234' && cleanPass !== expectedPin && cleanPass !== '1234') {
+        return { success: false, error: 'Contraseña de restaurante incorrecta.' };
+      }
+      const user: User = {
+        id: `user-${foundRest.id}`,
+        name: foundRest.name,
+        email: cleanEmail,
+        role: 'RESTAURANTE',
+        restaurantId: foundRest.id,
+        phone: foundRest.phone,
+        createdAt: new Date().toISOString(),
+      };
+      setCurrentUser(user);
+      setActiveRole('RESTAURANTE');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_auth_user', JSON.stringify(user));
+        sessionStorage.setItem(`merchant_auth_${foundRest.id}`, 'true');
+      }
+      return { success: true, role: 'RESTAURANTE' };
+    }
+
+    // 3. Detección Domiciliario (por email o por teléfono)
+    const foundDriver = drivers.find(
+      (d) =>
+        d.email.toLowerCase() === cleanEmail ||
+        d.phone.replace(/\D/g, '') === cleanEmail.replace(/\D/g, '') ||
+        d.name.toLowerCase().replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail
+    );
+
+    if (foundDriver) {
+      if (cleanPass !== 'domi1234' && cleanPass !== '1234') {
+        return { success: false, error: 'Contraseña de domiciliario incorrecta.' };
+      }
+      const user: User = {
+        id: foundDriver.id,
+        name: foundDriver.name,
+        email: foundDriver.email,
+        phone: foundDriver.phone,
+        role: 'DOMICILIARIO',
+        createdAt: new Date().toISOString(),
+      };
+      setCurrentUser(user);
+      setActiveRole('DOMICILIARIO');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dondomi_auth_user', JSON.stringify(user));
+      }
+      return { success: true, role: 'DOMICILIARIO' };
+    }
+
+    // Si es dominio dondomi y no existe
+    if (cleanEmail.includes('@dondomi.com')) {
+      return { success: false, error: 'No se encontró ninguna cuenta activa con este correo en DonDomi.' };
+    }
+
+    // 4. Usuario Cliente general
+    const clientUser: User = {
+      id: `cli-${Date.now()}`,
+      name: cleanEmail.split('@')[0],
+      email: cleanEmail,
+      role: 'CLIENTE',
+      createdAt: new Date().toISOString(),
+    };
+    setCurrentUser(clientUser);
+    setActiveRole('CLIENTE');
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dondomi_auth_user', JSON.stringify(clientUser));
+    }
+    return { success: true, role: 'CLIENTE' };
+  };
+
   // Métodos de autenticación unificada
   const loginAsAdmin = async (pin: string): Promise<{ success: boolean; error?: string }> => {
     if (pin.trim() !== '2026') {
@@ -624,11 +917,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addRestaurant,
         updateRestaurant,
         toggleRestaurantStatus,
+        categories,
+        addCategory,
+        updateCategory,
+        deleteCategory,
+        globalDeliveryFee,
+        setGlobalDeliveryFee,
+        globalAnnouncement,
+        setGlobalAnnouncement,
+        drivers,
+        addDriver,
+        toggleDriverStatus,
         productsByRestaurant,
         addProduct,
+        updateProduct,
         deleteProduct,
         toggleProductAvailability,
         currentUser,
+        loginWithEmail,
         loginAsAdmin,
         loginAsRestaurant,
         loginAsDriver,
