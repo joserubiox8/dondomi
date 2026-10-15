@@ -14,13 +14,13 @@ interface RestaurantCardProps {
 }
 
 export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
-  const { currentNeighborhood } = useApp();
+  const { currentNeighborhood, globalDeliveryFee } = useApp();
 
   // Calcular tarifa y tiempo estimado dinámicamente según el barrio actual del cliente
   const deliveryInfo = calculateDeliveryEstimate(
     restaurant.neighborhood,
     currentNeighborhood,
-    restaurant.deliveryFeeBase,
+    globalDeliveryFee || restaurant.deliveryFeeBase || 7000,
     restaurant.estimatedTimeMin,
     restaurant.estimatedTimeMax
   );

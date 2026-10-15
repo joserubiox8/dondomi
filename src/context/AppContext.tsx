@@ -4,7 +4,8 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserRole, User, Product, SelectedOption, Restaurant, Order, OrderStatus, FoodCategory, Driver } from '@/types';
 import { FOOD_CATEGORIES, INITIAL_DRIVERS, RESTAURANTS as INITIAL_RESTAURANTS, PRODUCTS_BY_RESTAURANT as INITIAL_PRODUCTS, MOCK_ORDERS as INITIAL_ORDERS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
-import { dbToRestaurant, restaurantToDb, dbToProduct, productToDb } from '@/lib/mappers';
+import { dbToRestaurant, restaurantToDb, dbToProduct, productToDb, dbToCategory, dbToDriver } from '@/lib/mappers';
+import { dataService } from '@/services/dataService';
 
 export interface CartItem {
   id: string;
@@ -233,31 +234,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const addCategory = (newCat: FoodCategory) => {
     setCategories((prev) => {
       const updated = [...prev, newCat];
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('dondomi_categories', JSON.stringify(updated));
-      }
       return updated;
     });
+    dataService.saveCategory(newCat);
   };
 
   const updateCategory = (cat: FoodCategory) => {
-    setCategories((prev) => {
-      const updated = prev.map((c) => (c.id === cat.id ? cat : c));
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('dondomi_categories', JSON.stringify(updated));
-      }
-      return updated;
-    });
+    setCategories((prev) => prev.map((c) => (c.id === cat.id ? cat : c)));
+    dataService.saveCategory(cat);
   };
 
   const deleteCategory = (catId: string) => {
-    setCategories((prev) => {
-      const updated = prev.filter((c) => c.id !== catId);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('dondomi_categories', JSON.stringify(updated));
-      }
-      return updated;
-    });
+    setCategories((prev) => prev.filter((c) => c.id !== catId));
+    dataService.deleteCategory(catId);
   };
 
   // Ajustes Globales de Plataforma
@@ -271,9 +260,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setGlobalDeliveryFee = (fee: number) => {
     setGlobalDeliveryFeeState(fee);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('dondomi_global_delivery_fee', String(fee));
-    }
+    dataService.updatePlatformConfig({ globalDeliveryFee: fee });
   };
 
   const [globalAnnouncement, setGlobalAnnouncementState] = useState<string | null>(() => {
@@ -285,10 +272,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setGlobalAnnouncement = (ann: string | null) => {
     setGlobalAnnouncementState(ann);
-    if (typeof window !== 'undefined') {
-      if (ann) localStorage.setItem('dondomi_global_announcement', ann);
-      else localStorage.removeItem('dondomi_global_announcement');
-    }
+    dataService.updatePlatformConfig({ globalAnnouncement: ann });
   };
 
   // Flota de Domiciliarios
@@ -305,23 +289,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   const addDriver = (driver: Driver) => {
-    setDrivers((prev) => {
-      const updated = [driver, ...prev];
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('dondomi_drivers', JSON.stringify(updated));
-      }
-      return updated;
-    });
+    setDrivers((prev) => [driver, ...prev]);
+    dataService.saveDriver(driver);
   };
 
   const toggleDriverStatus = (driverId: string) => {
-    setDrivers((prev) => {
-      const updated = prev.map((d) => (d.id === driverId ? { ...d, isActive: !d.isActive } : d));
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('dondomi_drivers', JSON.stringify(updated));
-      }
-      return updated;
-    });
+    const target = drivers.find((d) => d.id === driverId);
+    const currentActive = target ? target.isActive : true;
+    setDrivers((prev) => prev.map((d) => (d.id === driverId ? { ...d, isActive: !d.isActive } : d)));
+    dataService.toggleDriverActive(driverId, currentActive);
   };
 
   // Autenticación Real de la Plataforma
@@ -389,92 +365,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Cargar datos iniciales desde Supabase
+  // Cargar datos iniciales desde la capa de persistencia (Supabase con fallback local)
   useEffect(() => {
     async function loadData() {
       try {
-        // 1. Cargar restaurantes (Mezclando Supabase con iniciales para no perder Salchipapas Donde Chalo ni locales)
-        const { data: restData, error: restError } = await supabase
-          .from('restaurants')
-          .select('*')
-          .order('name');
+        const [restRes, prodRes, orderRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
+          dataService.getRestaurants(),
+          dataService.getProducts(),
+          dataService.getOrders(),
+          dataService.getCategories(),
+          dataService.getDrivers(),
+          dataService.getPlatformConfig(),
+        ]);
 
-        if (!restError && restData && restData.length > 0) {
-          const dbRests = restData.map(dbToRestaurant);
-          const restMap = new Map<string, Restaurant>();
-          INITIAL_RESTAURANTS.forEach((r) => restMap.set(r.id, r));
-          dbRests.forEach((r) => restMap.set(r.id, r));
-          setRestaurants(Array.from(restMap.values()));
+        if (restRes.status === 'fulfilled' && restRes.value.data.length > 0) {
+          setRestaurants(restRes.value.data);
         }
-
-        // 2. Cargar platos
-        const { data: prodData, error: prodError } = await supabase
-          .from('products')
-          .select('*')
-          .order('name');
-
-        if (!prodError && prodData && prodData.length > 0) {
-          const map: Record<string, Product[]> = { ...INITIAL_PRODUCTS };
-          prodData.forEach((row) => {
-            const p = dbToProduct(row);
-            if (!map[p.restaurantId]) map[p.restaurantId] = [];
-            const existingIdx = map[p.restaurantId].findIndex((item) => item.id === p.id);
-            if (existingIdx >= 0) {
-              map[p.restaurantId][existingIdx] = p;
-            } else {
-              map[p.restaurantId].push(p);
-            }
-          });
-          setProductsByRestaurant(map);
+        if (prodRes.status === 'fulfilled' && Object.keys(prodRes.value.data).length > 0) {
+          setProductsByRestaurant(prodRes.value.data);
         }
-
-        // 3. Cargar pedidos
-        const { data: orderData, error: orderError } = await supabase
-          .from('orders')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!orderError && orderData && orderData.length > 0) {
-          const mappedOrders: Order[] = orderData.map((row: any) => {
-            const parsed = parseOrderNotes(row.customer_notes);
-            return {
-              id: row.id,
-              orderNumber: row.order_number,
-              customerId: row.customer_name,
-              customerName: row.customer_name,
-              customerPhone: row.customer_phone,
-              restaurantId: row.restaurant_id || '',
-              restaurantName: row.restaurant_name,
-              driverId: row.driver_id || undefined,
-              driverName: row.driver_name || undefined,
-              status: row.status,
-              items: row.items || [],
-              subtotal: Number(row.subtotal),
-              deliveryFee: Number(row.delivery_fee),
-              serviceFee: Number(row.service_fee || 0),
-              total: Number(row.total),
-              paymentMethod: row.payment_method,
-              paymentStatus: row.payment_status,
-              deliveryAddress: row.delivery_address,
-              customerNotes: row.customer_notes,
-              estimatedDeliveryTime: row.estimated_delivery_time,
-              createdAt: row.created_at,
-              cancellationReason: parsed.cancellationReason,
-              cancelledBy: parsed.cancelledBy,
-              incidentReason: parsed.incidentReason,
-            };
-          });
-          setOrders(mappedOrders);
+        if (orderRes.status === 'fulfilled' && orderRes.value.data.length > 0) {
+          setOrders(orderRes.value.data);
+        }
+        if (catRes.status === 'fulfilled' && catRes.value.data.length > 0) {
+          setCategories(catRes.value.data);
+        }
+        if (drvRes.status === 'fulfilled' && drvRes.value.data.length > 0) {
+          setDrivers(drvRes.value.data);
+        }
+        if (cfgRes.status === 'fulfilled') {
+          setGlobalDeliveryFeeState(cfgRes.value.config.globalDeliveryFee);
+          setGlobalAnnouncementState(cfgRes.value.config.globalAnnouncement);
         }
       } catch (err) {
-        console.warn('Error conectando a Supabase, usando estado local:', err);
+        console.warn('Error inicializando datos en AppContext:', err);
       }
     }
 
     loadData();
 
-    // Suscripción en tiempo real a nuevos pedidos (Supabase Realtime)
-    const channel = supabase
+    // 1. Suscripción en tiempo real a Pedidos (Supabase Realtime)
+    const ordersChannel = supabase
       .channel('realtime_orders')
       .on(
         'postgres_changes',
@@ -535,8 +466,186 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       )
       .subscribe();
 
+    // 2. Suscripción en tiempo real a Catálogo (Restaurantes, Platos y Categorías)
+    const catalogChannel = supabase
+      .channel('realtime_catalog')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'restaurants' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            const updatedRest = dbToRestaurant(payload.new);
+            setRestaurants((prev) => {
+              const idx = prev.findIndex((r) => r.id === updatedRest.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = updatedRest;
+                return next;
+              }
+              return [updatedRest, ...prev];
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            const p = dbToProduct(payload.new);
+            setProductsByRestaurant((prev) => {
+              const currentList = prev[p.restaurantId] || [];
+              const idx = currentList.findIndex((item) => item.id === p.id);
+              let nextList: Product[];
+              if (idx >= 0) {
+                nextList = [...currentList];
+                nextList[idx] = p;
+              } else {
+                nextList = [p, ...currentList];
+              }
+              return { ...prev, [p.restaurantId]: nextList };
+            });
+          } else if (payload.eventType === 'DELETE' && payload.old?.id) {
+            const deletedId = payload.old.id;
+            setProductsByRestaurant((prev) => {
+              const updated: Record<string, Product[]> = {};
+              Object.keys(prev).forEach((restId) => {
+                updated[restId] = prev[restId].filter((item) => item.id !== deletedId);
+              });
+              return updated;
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'categories' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            const cat = dbToCategory(payload.new);
+            setCategories((prev) => {
+              const idx = prev.findIndex((c) => c.id === cat.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = cat;
+                return next;
+              }
+              return [...prev, cat];
+            });
+          } else if (payload.eventType === 'DELETE' && payload.old?.id) {
+            setCategories((prev) => prev.filter((c) => c.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    // 3. Suscripción en tiempo real a Flota y Configuración Global
+    const fleetConfigChannel = supabase
+      .channel('realtime_fleet_config')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'drivers' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            const drv = dbToDriver(payload.new);
+            setDrivers((prev) => {
+              const idx = prev.findIndex((d) => d.id === drv.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = drv;
+                return next;
+              }
+              return [drv, ...prev];
+            });
+          } else if (payload.eventType === 'DELETE' && payload.old?.id) {
+            setDrivers((prev) => prev.filter((d) => d.id !== payload.old.id));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'platform_config' },
+        (payload) => {
+          if (payload.new) {
+            const row: any = payload.new;
+            if (row.global_delivery_fee !== undefined) {
+              setGlobalDeliveryFeeState(Number(row.global_delivery_fee) || 7000);
+            }
+            if (row.global_announcement !== undefined) {
+              setGlobalAnnouncementState(row.global_announcement);
+            }
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(ordersChannel);
+      supabase.removeChannel(catalogChannel);
+      supabase.removeChannel(fleetConfigChannel);
+    };
+  }, []);
+
+  // Revalidación throttled (15 segundos) al recuperar foco o visibilidad de la pestaña
+  useEffect(() => {
+    let lastRevalidation = Date.now();
+    const THROTTLE_MS = 15000;
+
+    const handleRevalidation = async () => {
+      const now = Date.now();
+      if (now - lastRevalidation < THROTTLE_MS) return;
+      lastRevalidation = now;
+
+      try {
+        const [ordersRes, restRes, prodRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
+          dataService.getOrders(),
+          dataService.getRestaurants(),
+          dataService.getProducts(),
+          dataService.getCategories(),
+          dataService.getDrivers(),
+          dataService.getPlatformConfig(),
+        ]);
+
+        if (ordersRes.status === 'fulfilled' && ordersRes.value.data.length > 0) {
+          setOrders(ordersRes.value.data);
+        }
+        if (restRes.status === 'fulfilled' && restRes.value.data.length > 0) {
+          setRestaurants(restRes.value.data);
+        }
+        if (prodRes.status === 'fulfilled' && Object.keys(prodRes.value.data).length > 0) {
+          setProductsByRestaurant(prodRes.value.data);
+        }
+        if (catRes.status === 'fulfilled' && catRes.value.data.length > 0) {
+          setCategories(catRes.value.data);
+        }
+        if (drvRes.status === 'fulfilled' && drvRes.value.data.length > 0) {
+          setDrivers(drvRes.value.data);
+        }
+        if (cfgRes.status === 'fulfilled') {
+          setGlobalDeliveryFeeState(cfgRes.value.config.globalDeliveryFee);
+          setGlobalAnnouncementState(cfgRes.value.config.globalAnnouncement);
+        }
+      } catch (err) {
+        console.warn('Revalidación throttled falló en segundo plano:', err);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleRevalidation();
+      }
+    };
+
+    const onFocus = () => {
+      handleRevalidation();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 

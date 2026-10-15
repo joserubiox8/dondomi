@@ -1,4 +1,4 @@
-import { Restaurant, Product } from '@/types';
+import { Restaurant, Product, FoodCategory, Driver } from '@/types';
 import { RESTAURANTS, PRODUCTS_BY_RESTAURANT } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
 
@@ -97,5 +97,58 @@ export function dbToProduct(data: any): Product {
     isPopular: data.is_popular ?? false,
     preparationTimeMin: data.preparation_time_min || 20,
     options: data.options || undefined,
+  };
+}
+
+export function categoryToDb(c: FoodCategory) {
+  return {
+    id: c.id,
+    name: c.name,
+    slug: c.slug,
+    icon: c.icon,
+    badge: c.badge || null,
+    image_url: c.imageUrl || null,
+  };
+}
+
+export function dbToCategory(data: any): FoodCategory {
+  return {
+    id: data.id,
+    name: data.name,
+    slug: data.slug,
+    icon: data.icon,
+    badge: data.badge || undefined,
+    imageUrl: data.image_url || undefined,
+  };
+}
+
+export function driverToDb(d: Driver) {
+  return {
+    id: d.id,
+    user_id: d.userId || null,
+    name: d.name,
+    phone: d.phone,
+    email: d.email,
+    plate: d.plate,
+    vehicle_type: d.vehicleType || 'MOTO',
+    is_active: d.isActive,
+    rating: d.rating,
+    total_deliveries: d.totalDeliveries,
+  };
+}
+
+export function dbToDriver(data: any): Driver {
+  return {
+    id: data.id,
+    userId: data.user_id || undefined,
+    name: data.name,
+    phone: data.phone,
+    email: data.email,
+    plate: data.plate,
+    vehicleType: (data.vehicle_type as 'MOTO' | 'BICICLETA') || 'MOTO',
+    isActive: data.is_active ?? true,
+    rating: Number(data.rating) || 5.0,
+    totalDeliveries: Number(data.total_deliveries) || 0,
+    createdAt: data.created_at || new Date().toISOString(),
   };
 }

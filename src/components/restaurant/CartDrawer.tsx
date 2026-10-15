@@ -20,6 +20,7 @@ import {
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
 import { calculateDeliveryEstimate } from '@/lib/delivery';
+import { calculateOrderPricing } from '@/lib/pricing';
 import { Order, OrderItem } from '@/types';
 
 interface CartDrawerProps {
@@ -55,12 +56,23 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const [checkoutStage, setCheckoutStage] = useState<'IDLE' | 'SENDING' | 'CONFIRMED'>('IDLE');
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
+  // Idempotencia en reintentos de orden (evita duplicar pedidos ante errores de red)
+  const [draftOrderId, setDraftOrderId] = useState<string | null>(null);
+  const [draftOrderNumber, setDraftOrderNumber] = useState<string | null>(null);
+
+  // Reiniciar borrador si el contenido de la canasta cambia
+  React.useEffect(() => {
+    setDraftOrderId(null);
+    setDraftOrderNumber(null);
+  }, [cart.length, cartSubtotal]);
+
   if (!isOpen) return null;
 
   const currentRestaurant = restaurants.find((r) => r.id === cartRestaurantId);
-  const deliveryFee = globalDeliveryFee || 7000; // Tarifa configurada por la plataforma
-  const platformFee = 0; // $0 COP tarifa de servicio DonDomi
-  const grandTotal = cartSubtotal + deliveryFee;
+  const pricing = calculateOrderPricing(cartSubtotal, globalDeliveryFee);
+  const deliveryFee = pricing.deliveryFee;
+  const platformFee = pricing.serviceFee;
+  const grandTotal = pricing.total;
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,10 +105,17 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       }
     }
 
-    const orderNumber = `DD-${Math.floor(1000 + Math.random() * 9000)}`;
+    // Idempotencia: Si ya teníamos un borrador generado por un reintento fallido, lo reutilizamos
+    const orderNumber = draftOrderNumber || `DD-${Math.floor(1000 + Math.random() * 9000)}`;
+    const orderId = draftOrderId || `ord-${Date.now()}`;
 
-    const orderItems: OrderItem[] = cart.map((item) => ({
-      id: `item-${Date.now()}-${item.product.id}`,
+    if (!draftOrderId) {
+      setDraftOrderId(orderId);
+      setDraftOrderNumber(orderNumber);
+    }
+
+    const orderItems: OrderItem[] = cart.map((item, idx) => ({
+      id: `item-${orderId}-${idx}-${item.product.id}`,
       productId: item.product.id,
       productName: item.product.name,
       quantity: item.quantity,
@@ -107,7 +126,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     }));
 
     const newOrder: Order = {
-      id: `ord-${Date.now()}`,
+      id: orderId,
       orderNumber,
       customerId: `cust-${Date.now()}`,
       customerName: customerName.trim(),
@@ -167,6 +186,9 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       await new Promise((resolve) => setTimeout(resolve, 1200));
 
       setPlacedOrder(newOrder);
+      // Limpiar borrador de idempotencia una vez confirmado con éxito
+      setDraftOrderId(null);
+      setDraftOrderNumber(null);
       setCheckoutStage('IDLE');
     } catch (err: any) {
       setCheckoutStage('IDLE');
