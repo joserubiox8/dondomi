@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { Download, X, Smartphone, MoreVertical, Share } from 'lucide-react';
 
 export default function PwaInstallPrompt() {
+  const pathname = usePathname() || '/';
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isStandalone, setIsStandalone] = useState<boolean>(false);
   const [isIos, setIsIos] = useState<boolean>(false);
@@ -11,10 +13,57 @@ export default function PwaInstallPrompt() {
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
   const [mounted, setMounted] = useState<boolean>(false);
 
+  // Configuración visual y de manifest según la ruta activa
+  const appMeta = pathname.startsWith('/merchant')
+    ? {
+        title: 'Instalar DonDomi Aliados',
+        subtitle: 'App exclusiva de Cocina y KDS',
+        badge: 'Panel Aliados',
+        manifestHref: '/manifest-merchant.json',
+        iconBg: 'from-slate-800 to-amber-600',
+        btnBg: 'bg-amber-500 hover:bg-amber-400 text-slate-950',
+      }
+    : pathname.startsWith('/driver')
+    ? {
+        title: 'Instalar DonDomi Flota',
+        subtitle: 'Radar y rutas para domiciliarios',
+        badge: 'App Repartidor',
+        manifestHref: '/manifest-driver.json',
+        iconBg: 'from-emerald-600 to-green-500',
+        btnBg: 'bg-emerald-600 hover:bg-emerald-500 text-white',
+      }
+    : pathname.startsWith('/admin')
+    ? {
+        title: 'Instalar DonDomi Admin',
+        subtitle: 'Torre de control en tu pantalla',
+        badge: 'Master Admin',
+        manifestHref: '/manifest-admin.json',
+        iconBg: 'from-indigo-600 to-violet-600',
+        btnBg: 'bg-indigo-600 hover:bg-indigo-500 text-white',
+      }
+    : {
+        title: 'Instalar DonDomi',
+        subtitle: 'Pide más rápido desde tu inicio',
+        badge: 'App Oficial Valledupar',
+        manifestHref: '/manifest-client.json',
+        iconBg: 'from-orange-600 to-amber-500',
+        btnBg: 'bg-orange-600 hover:bg-orange-500 text-white',
+      };
+
+  // Mantener sincronizado el <link rel="manifest"> en navegación cliente
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      const link = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
+      if (link && link.getAttribute('href') !== appMeta.manifestHref) {
+        link.setAttribute('href', appMeta.manifestHref);
+      }
+    }
+  }, [appMeta.manifestHref]);
+
   useEffect(() => {
     setMounted(true);
 
-    // 1. Registrar Service Worker
+    // 1. Registrar Service Worker ligero (no intercepta Supabase Realtime)
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
         console.warn('SW registration failed:', err);
@@ -22,7 +71,6 @@ export default function PwaInstallPrompt() {
     }
 
     if (typeof window !== 'undefined') {
-      // Limpiar bloqueo permanente anterior si existía
       sessionStorage.removeItem('dondomi_pwa_dismissed');
 
       // 2. Verificar si ya está corriendo como App instalada (standalone)
@@ -35,7 +83,6 @@ export default function PwaInstallPrompt() {
         return;
       }
 
-      // Restaurar si el usuario solo lo minimizó a pastilla compacta
       const minimizedPref = sessionStorage.getItem('dondomi_pwa_minimized');
       if (minimizedPref === 'true') {
         setIsMinimized(true);
@@ -81,7 +128,6 @@ export default function PwaInstallPrompt() {
         setShowGuideModal(true);
       }
     } else {
-      // Si el navegador no disparó beforeinstallprompt aún o es iOS, mostramos guía clara
       setShowGuideModal(true);
     }
   };
@@ -98,16 +144,15 @@ export default function PwaInstallPrompt() {
 
   return (
     <>
-      {/* Versión Minimizada: Pastilla flotante discreta que SIEMPRE permite recuperar la instalación */}
       {isMinimized ? (
         <div className="fixed bottom-4 left-4 z-40 print:hidden animate-in fade-in duration-200">
           <button
             type="button"
             onClick={handleInstallClick}
             className="bg-slate-900 hover:bg-slate-800 text-white border border-slate-700 rounded-full px-3.5 py-2 shadow-xl flex items-center gap-2 transition transform active:scale-95 cursor-pointer"
-            title="Instalar aplicación DonDomi"
+            title={appMeta.title}
           >
-            <span className="w-6 h-6 rounded-full bg-orange-600 text-white flex items-center justify-center shadow-xs">
+            <span className={`w-6 h-6 rounded-full bg-gradient-to-tr ${appMeta.iconBg} text-white flex items-center justify-center shadow-xs`}>
               <Download className="w-3.5 h-3.5" />
             </span>
             <span className="text-xs font-extrabold text-white tracking-tight">
@@ -116,22 +161,21 @@ export default function PwaInstallPrompt() {
           </button>
         </div>
       ) : (
-        /* Versión Expandida: Banner flotante con alto contraste y botón claro */
         <div className="fixed bottom-4 left-4 right-4 sm:right-auto sm:max-w-sm z-40 print:hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="bg-slate-900 text-white border border-slate-700 rounded-2xl p-3 shadow-2xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-orange-600 to-amber-500 flex items-center justify-center text-white font-black text-sm shadow-md flex-shrink-0">
+              <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${appMeta.iconBg} flex items-center justify-center text-white font-black text-sm shadow-md flex-shrink-0`}>
                 DD
               </div>
               <div className="min-w-0">
                 <span className="text-[10px] font-extrabold text-orange-400 uppercase tracking-wider block leading-none">
-                  App Oficial Valledupar
+                  {appMeta.badge}
                 </span>
                 <span className="text-xs sm:text-sm font-black text-white truncate block mt-0.5">
-                  Instalar DonDomi
+                  {appMeta.title}
                 </span>
                 <span className="text-[11px] text-slate-300 truncate block">
-                  Pide más rápido desde tu inicio
+                  {appMeta.subtitle}
                 </span>
               </div>
             </div>
@@ -140,10 +184,10 @@ export default function PwaInstallPrompt() {
               <button
                 type="button"
                 onClick={handleInstallClick}
-                className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl shadow-md shadow-orange-600/30 transition flex items-center gap-1.5 cursor-pointer"
+                className={`${appMeta.btnBg} font-extrabold text-xs px-3.5 py-2 rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer`}
               >
-                <Download className="w-3.5 h-3.5 text-white" />
-                <span className="text-white">Instalar</span>
+                <Download className="w-3.5 h-3.5" />
+                <span>Instalar</span>
               </button>
 
               <button
@@ -159,7 +203,6 @@ export default function PwaInstallPrompt() {
         </div>
       )}
 
-      {/* Modal Instructivo de Instalación (Android / iPhone) */}
       {showGuideModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-4 print:hidden">
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full text-slate-900 space-y-4 shadow-2xl animate-in zoom-in-95">
@@ -169,7 +212,7 @@ export default function PwaInstallPrompt() {
                   <Smartphone className="w-4 h-4" />
                 </div>
                 <h3 className="font-black text-sm text-slate-900">
-                  {isIos ? 'Instalar DonDomi en iPhone' : 'Instalar App DonDomi'}
+                  {appMeta.title}
                 </h3>
               </div>
               <button
@@ -184,7 +227,7 @@ export default function PwaInstallPrompt() {
             {isIos ? (
               <>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Agrega <strong>DonDomi</strong> a tu pantalla de inicio en iPhone en 2 pasos rápidos:
+                  Instala esta aplicación independiente en tu iPhone en 2 pasos:
                 </p>
                 <ol className="text-xs space-y-3 text-slate-700">
                   <li className="flex items-start gap-2.5">
@@ -201,7 +244,7 @@ export default function PwaInstallPrompt() {
                       2
                     </span>
                     <span>
-                      Selecciona <strong>&quot;Agregar a inicio&quot;</strong> (Add to Home Screen) y toca <strong>Agregar</strong>.
+                      Selecciona <strong>&quot;Agregar a inicio&quot;</strong> y toca <strong>Agregar</strong>.
                     </span>
                   </li>
                 </ol>
@@ -209,7 +252,7 @@ export default function PwaInstallPrompt() {
             ) : (
               <>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Para instalar la aplicación oficial de <strong>DonDomi</strong> en tu teléfono Android:
+                  Para instalar esta aplicación independiente en tu teléfono Android:
                 </p>
                 <ol className="text-xs space-y-3 text-slate-700">
                   <li className="flex items-start gap-2.5">
@@ -237,7 +280,7 @@ export default function PwaInstallPrompt() {
             <button
               type="button"
               onClick={() => setShowGuideModal(false)}
-              className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-2.5 rounded-2xl text-xs transition shadow-md cursor-pointer"
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-2.5 rounded-2xl text-xs transition shadow-md cursor-pointer"
             >
               ¡Listo, entendido!
             </button>

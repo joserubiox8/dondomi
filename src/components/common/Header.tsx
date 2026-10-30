@@ -6,8 +6,6 @@ import { useRouter } from 'next/navigation';
 import {
   MapPin,
   ShoppingBag,
-  LogIn,
-  LogOut,
   Clock,
   X,
   RotateCcw,
@@ -24,7 +22,6 @@ export default function Header() {
     cartCount,
     cartSubtotal,
     currentUser,
-    logout,
     globalDeliveryFee,
     globalAnnouncement,
     orders,
@@ -66,7 +63,6 @@ export default function Header() {
   const sessionOrders = useMemo(() => {
     const cleanSavedPhone = savedProfilePhone.replace(/\D/g, '');
 
-    // Primero verificamos si hay pedidos específicos del dispositivo o teléfono guardado
     const matchedByDeviceOrPhone = orders.filter((o) => {
       const matchesDevice = deviceOrderNums.some(
         (num) =>
@@ -94,8 +90,6 @@ export default function Header() {
       return false;
     });
 
-    // Si hay pedidos vinculados al dispositivo/teléfono pero también hay otros pedidos activos en el estado global de la sesión,
-    // o si aún no hay perfil guardado en localStorage, incluimos los pedidos registrados en el estado global
     if (matchedByDeviceOrPhone.length > 0) {
       const ids = new Set(matchedByDeviceOrPhone.map((o) => o.id));
       const activeGlobal = orders.filter(
@@ -107,7 +101,6 @@ export default function Header() {
     return orders;
   }, [orders, deviceOrderNums, savedProfilePhone, currentUser]);
 
-  // Contador para el botón "Mis Pedidos": prioriza mostrar el total de pedidos en la sesión
   const activeSessionOrdersCount = useMemo(() => {
     return sessionOrders.filter(
       (o) => o.status !== 'DELIVERED' && o.status !== 'CANCELLED'
@@ -117,7 +110,6 @@ export default function Header() {
   const badgeCount =
     activeSessionOrdersCount > 0 ? activeSessionOrdersCount : sessionOrders.length;
 
-  // Lista filtrada dentro del modal por buscador opcional (celular, #DD o restaurante)
   const displayedOrders = useMemo(() => {
     const q = searchFilter.trim().toLowerCase();
     if (!q) return sessionOrders;
@@ -130,10 +122,6 @@ export default function Header() {
     );
   }, [sessionOrders, orders, searchFilter]);
 
-  // Solo tratamos como sesión visible en la tienda pública al rol CLIENTE.
-  // Si un ADMINISTRADOR, RESTAURANTE o DOMICILIARIO visita el Home, no mostramos etiquetas de rol interno.
-  const isClientSession = currentUser?.role === 'CLIENTE';
-
   return (
     <>
       <header className="sticky top-0 z-40 w-full max-w-full overflow-hidden bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-xs">
@@ -145,10 +133,10 @@ export default function Header() {
           </div>
         )}
 
-        {/* Main header row: 100% responsive without horizontal overflow */}
-        <div className="max-w-4xl mx-auto w-full px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-1.5 sm:gap-3 min-w-0">
+        {/* Main header row: 100% responsive y enfocado exclusivamente en el cliente */}
+        <div className="max-w-4xl mx-auto w-full px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-3 min-w-0">
           {/* Brand Logo */}
-          <Link href="/" className="flex items-center gap-1.5 sm:gap-2 group flex-shrink-0 min-w-0">
+          <Link href="/" className="flex items-center gap-2 group flex-shrink-0 min-w-0">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-orange-600 via-red-500 to-amber-500 flex items-center justify-center shadow-md shadow-orange-500/20 group-hover:scale-105 transition transform flex-shrink-0">
               <span className="text-white font-black text-lg sm:text-xl tracking-tighter">DD</span>
             </div>
@@ -179,12 +167,12 @@ export default function Header() {
             </div>
           </div>
 
-          {/* Right side actions: Mis Pedidos, Cart & Ingresar (compacto en móvil) */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 min-w-0">
+          {/* Right side actions: Únicamente Mis Pedidos y Resumen de Canasta */}
+          <div className="flex items-center gap-2 flex-shrink-0 min-w-0">
             <button
               type="button"
               onClick={() => setIsMyOrdersOpen(true)}
-              className="flex items-center gap-1 sm:gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 sm:px-3 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition cursor-pointer flex-shrink-0"
+              className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 sm:px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer flex-shrink-0"
               title="Consultar mis pedidos"
             >
               <Clock className="w-3.5 h-3.5 text-orange-600 flex-shrink-0" />
@@ -202,34 +190,10 @@ export default function Header() {
 
             {/* Quick Cart / Order summary badge */}
             {cartCount > 0 && (
-              <div className="bg-orange-600 text-white rounded-full px-2.5 sm:px-3 py-1.5 flex items-center gap-1 shadow-md shadow-orange-500/30 text-[11px] sm:text-xs font-bold animate-in fade-in flex-shrink-0">
+              <div className="bg-orange-600 text-white rounded-full px-2.5 sm:px-3 py-1.5 flex items-center gap-1 shadow-md shadow-orange-500/30 text-xs font-bold animate-in fade-in flex-shrink-0">
                 <ShoppingBag className="w-3.5 h-3.5 flex-shrink-0" />
                 <span>{cartCount}</span>
-                <span className="hidden lg:inline">· {formatCOP(cartSubtotal)}</span>
-              </div>
-            )}
-
-            {/* Acceso limpio orientado al cliente (sin mostrar etiquetas de Administrador en el Home) */}
-            {!isClientSession ? (
-              <Link
-                href="/login"
-                className="flex items-center gap-1 sm:gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold shadow-xs transition active:scale-95 flex-shrink-0"
-              >
-                <LogIn className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
-                <span className="whitespace-nowrap">Ingresar</span>
-              </Link>
-            ) : (
-              <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-full pl-2.5 pr-1 py-1 flex-shrink-0">
-                <span className="text-[11px] sm:text-xs font-bold text-slate-800 truncate max-w-[75px] sm:max-w-[120px]">
-                  {currentUser.name.split(' ')[0]}
-                </span>
-                <button
-                  onClick={logout}
-                  title="Cerrar sesión"
-                  className="p-1 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition cursor-pointer"
-                >
-                  <LogOut className="w-3 h-3" />
-                </button>
+                <span className="hidden sm:inline">· {formatCOP(cartSubtotal)}</span>
               </div>
             )}
           </div>

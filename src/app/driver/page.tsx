@@ -39,9 +39,31 @@ export default function DriverPage() {
     updateOrderStatus,
     toggleDriverAvailability,
     logout,
+    loginWithEmail,
     loginAsDriver,
     globalDeliveryFee,
   } = useApp();
+
+  const [loginIdentity, setLoginIdentity] = useState<string>('javier@dondomi.com');
+  const [loginPass, setLoginPass] = useState<string>('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+
+  const isDriverAuthenticated = currentUser?.role === 'DOMICILIARIO';
+
+  const handleDriverLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    setIsLoggingIn(true);
+    try {
+      const res = await loginWithEmail(loginIdentity, loginPass);
+      if (!res.success || res.role !== 'DOMICILIARIO') {
+        setLoginError(res.error || 'Credenciales de domiciliario inválidas.');
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const [walletPeriod, setWalletPeriod] = useState<'TODAY' | 'ALL'>('TODAY');
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
@@ -227,6 +249,106 @@ export default function DriverPage() {
   const activeRestDetails = activeOrder
     ? getRestaurantDetails(activeOrder.restaurantId, activeOrder.restaurantName)
     : null;
+
+  if (!isDriverAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex flex-col justify-between p-4 sm:p-6 selection:bg-emerald-500 selection:text-white">
+        <header className="max-w-md w-full mx-auto flex items-center justify-between py-2">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition"
+          >
+            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+              <ArrowLeft className="w-4 h-4" />
+            </div>
+            <span>Ir a la tienda</span>
+          </Link>
+          <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full">
+            DonDomi Flota
+          </span>
+        </header>
+
+        <main className="max-w-md w-full mx-auto my-auto py-4">
+          <div className="bg-slate-800/95 border border-slate-700 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="text-center space-y-2">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-600 text-white mx-auto flex items-center justify-center shadow-lg shadow-emerald-600/30">
+                <Bike className="w-8 h-8" />
+              </div>
+              <h1 className="text-xl font-black text-white">DonDomi Flota</h1>
+              <p className="text-xs text-slate-400">
+                Acceso exclusivo para domiciliarios autorizados en Valledupar
+              </p>
+            </div>
+
+            {loginError && (
+              <div className="p-3 bg-red-950/70 border border-red-500/40 rounded-2xl text-xs font-bold text-red-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleDriverLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Repartidor Registrado / Correo
+                </label>
+                <select
+                  value={loginIdentity}
+                  onChange={(e) => setLoginIdentity(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  {drivers.map((d) => (
+                    <option key={d.id} value={d.email}>
+                      {d.name} ({d.plate}) — {d.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Contraseña / PIN de Turno
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={loginPass}
+                  onChange={(e) => setLoginPass(e.target.value)}
+                  placeholder="Clave o PIN (ej: domi1234 o 1234)"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 transition text-sm cursor-pointer"
+              >
+                {isLoggingIn ? 'Iniciando turno...' : 'Iniciar Turno de Reparto'}
+              </button>
+            </form>
+
+            <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between text-[11px] text-slate-400">
+              <span>
+                Clave predeterminada: <strong className="text-emerald-400 font-mono">domi1234</strong>
+              </span>
+              <button
+                type="button"
+                onClick={handleQuickDemoLogin}
+                className="text-emerald-400 hover:underline font-bold cursor-pointer"
+              >
+                Acceso rápido Demo →
+              </button>
+            </div>
+          </div>
+        </main>
+
+        <footer className="text-center text-[11px] text-slate-500 py-2">
+          DonDomi Flota · Valledupar
+        </footer>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20">

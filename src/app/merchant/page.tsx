@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   ChefHat,
   Clock,
@@ -51,7 +50,6 @@ type MerchantTab = 'KDS' | 'MENU' | 'HORARIOS' | 'VENTAS';
 type KdsFilter = 'ACTIVOS' | 'NUEVOS' | 'EN_COCINA' | 'EN_RUTA' | 'ENTREGADOS' | 'CANCELADOS';
 
 export default function MerchantPage() {
-  const router = useRouter();
   const {
     restaurants,
     orders,
@@ -67,8 +65,42 @@ export default function MerchantPage() {
     updateRestaurant,
     toggleRestaurantStatus,
     currentUser,
+    loginWithEmail,
+    loginAsRestaurant,
     logout,
   } = useApp();
+
+  // Estado para control de acceso interno en /merchant
+  const [loginRestId, setLoginRestId] = useState<string>('');
+  const [loginPin, setLoginPin] = useState<string>('');
+  const [loginEmail, setLoginEmail] = useState<string>('');
+  const [loginMode, setLoginMode] = useState<'PIN' | 'EMAIL'>('PIN');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+
+  const isMerchantAuthenticated = currentUser?.role === 'RESTAURANTE';
+
+  const handleMerchantLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    setIsLoggingIn(true);
+    try {
+      if (loginMode === 'EMAIL') {
+        const res = await loginWithEmail(loginEmail, loginPin);
+        if (!res.success || res.role !== 'RESTAURANTE') {
+          setLoginError(res.error || 'Credenciales de restaurante inválidas.');
+        }
+      } else {
+        const targetId = loginRestId || restaurants[0]?.id || 'rest-1';
+        const res = await loginAsRestaurant(targetId, loginPin);
+        if (!res.success) {
+          setLoginError(res.error || 'PIN de cocina incorrecto.');
+        }
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const [activeTab, setActiveTab] = useState<MerchantTab>('KDS');
   const [kdsFilter, setKdsFilter] = useState<KdsFilter>('ACTIVOS');
@@ -536,6 +568,142 @@ export default function MerchantPage() {
   const periodOrders = filterOrdersByPeriod(restaurantOrders, salesPeriod);
   const settlement = calculateRestaurantSettlement(periodOrders, restaurant.commissionRate || 0);
 
+  if (!isMerchantAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex flex-col justify-between p-4 sm:p-6 selection:bg-amber-500 selection:text-slate-950">
+        <header className="max-w-md w-full mx-auto flex items-center justify-between py-2">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition"
+          >
+            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+              <ArrowLeft className="w-4 h-4" />
+            </div>
+            <span>Ir a la tienda</span>
+          </Link>
+          <span className="text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-full">
+            DonDomi Aliados
+          </span>
+        </header>
+
+        <main className="max-w-md w-full mx-auto my-auto py-4">
+          <div className="bg-slate-800/95 border border-slate-700 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="text-center space-y-2">
+              <div className="w-16 h-16 rounded-2xl bg-slate-950 border border-amber-500/40 text-amber-400 mx-auto flex items-center justify-center shadow-inner">
+                <ChefHat className="w-8 h-8" />
+              </div>
+              <h1 className="text-xl font-black text-white">DonDomi Aliados</h1>
+              <p className="text-xs text-slate-400">
+                Acceso exclusivo para restaurantes y cocinas afiliadas en Valledupar
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-2xl text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode('PIN');
+                  setLoginError(null);
+                }}
+                className={`py-2 rounded-xl transition cursor-pointer ${
+                  loginMode === 'PIN' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'
+                }`}
+              >
+                Por Restaurante + PIN
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode('EMAIL');
+                  setLoginError(null);
+                }}
+                className={`py-2 rounded-xl transition cursor-pointer ${
+                  loginMode === 'EMAIL' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'
+                }`}
+              >
+                Por Correo + Clave
+              </button>
+            </div>
+
+            {loginError && (
+              <div className="p-3 bg-red-950/70 border border-red-500/40 rounded-2xl text-xs font-bold text-red-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleMerchantLogin} className="space-y-4">
+              {loginMode === 'PIN' ? (
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                    Selecciona tu Restaurante
+                  </label>
+                  <select
+                    value={loginRestId || restaurants[0]?.id || 'rest-1'}
+                    onChange={(e) => setLoginRestId(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    {restaurants
+                      .filter((r) => (r.accountStatus || 'ACTIVE') !== 'ARCHIVED')
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name} ({r.neighborhood})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                    Correo del Restaurante
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="elvalle@dondomi.com"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  {loginMode === 'PIN' ? 'PIN de Cocina' : 'Contraseña / PIN'}
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={loginPin}
+                  onChange={(e) => setLoginPin(e.target.value)}
+                  placeholder={loginMode === 'PIN' ? 'PIN (ej: 1234)' : 'Contraseña'}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-mono text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3.5 rounded-2xl shadow-lg transition text-sm cursor-pointer"
+              >
+                {isLoggingIn ? 'Abriendo cocina...' : 'Entrar al Panel Aliado'}
+              </button>
+            </form>
+
+            <div className="pt-2 border-t border-slate-700/60 text-center text-[11px] text-slate-400">
+              💡 PIN de prueba predeterminado: <strong className="text-amber-400 font-mono">1234</strong>
+            </div>
+          </div>
+        </main>
+
+        <footer className="text-center text-[11px] text-slate-500 py-2">
+          DonDomi Aliados · Valledupar
+        </footer>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20 selection:bg-orange-500 selection:text-white">
       {/* Top Header Bar */}
@@ -588,11 +756,8 @@ export default function MerchantPage() {
             </button>
 
             <button
-              onClick={() => {
-                logout();
-                router.push('/login');
-              }}
-              title="Cerrar turno y salir"
+              onClick={() => logout()}
+              title="Cerrar turno y bloquear cocina"
               className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />

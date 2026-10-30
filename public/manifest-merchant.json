@@ -1,0 +1,33 @@
+{
+  "name": "DonDomi Aliados - Restaurantes",
+  "short_name": "DonDomi Aliados",
+  "description": "Panel operativo KDS, gestión de carta y cierre de caja para restaurantes afiliados a DonDomi en Valledupar.",
+  "start_url": "/merchant",
+  "scope": "/merchant",
+  "id": "/merchant",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0F172A",
+  "background_color": "#0F172A",
+  "categories": ["business", "food", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-merchant-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-merchant-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-merchant.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

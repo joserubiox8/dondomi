@@ -13,13 +13,13 @@ const fontSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'DonDomi | Comida y Domicilios en Valledupar',
+  title: 'DonDomi Valledupar | Comida y Domicilios',
   description:
-    'Pide la mejor comida de tus restaurantes favoritos en Valledupar rápido, fresco y a la puerta de tu casa.',
-  manifest: '/manifest.json',
+    'Pide la mejor comida de tus restaurantes favoritos en Valledupar rápido, fresco y a la puerta de tu casa con tarifa fija de $7.000 COP.',
+  manifest: '/manifest-client.json',
   icons: {
-    icon: '/brand/dondomi-icon-192.png',
-    apple: '/brand/dondomi-icon-192.png',
+    icon: '/icons/icon-client-192.png',
+    apple: '/icons/icon-client-192.png',
   },
   appleWebApp: {
     capable: true,
@@ -33,7 +33,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#ea580c',
+  themeColor: '#EA580C',
 };
 
 export default function RootLayout({
