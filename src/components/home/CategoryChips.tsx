@@ -17,8 +17,8 @@ export default function CategoryChips() {
         </div>
       </div>
 
-      <div className="relative">
-        <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1 -mx-4 px-4 scroll-smooth">
+      <div className="relative overflow-hidden">
+        <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1 px-1 scroll-smooth">
         {/* "Todos" button */}
         <button
           onClick={() => setSelectedCategorySlug(null)}

@@ -28,7 +28,7 @@ export default function ActiveOrderBanner() {
 
       setActiveOrderNumbers(list);
     }
-  }, []);
+  }, [orders]);
 
   if (activeOrderNumbers.length === 0) return null;
 
