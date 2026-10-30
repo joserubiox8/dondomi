@@ -16,11 +16,12 @@ import {
   Copy,
   Check,
   Wallet,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
 import { calculateOrderPricing } from '@/lib/pricing';
-import { Order, OrderItem, PaymentMethod } from '@/types';
+import { Order, OrderItem, PaymentMethod, Restaurant } from '@/types';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -28,6 +29,27 @@ interface CartDrawerProps {
 }
 
 const CUSTOMER_PROFILE_KEY = 'dondomi_customer_profile_v1';
+
+interface SavedCustomerProfile {
+  customerName?: string;
+  customerPhone?: string;
+  deliveryNeighborhood?: string;
+  deliveryStreet?: string;
+  deliveryReference?: string;
+  orderNotes?: string;
+  paymentMethod?: 'EFECTIVO' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD';
+}
+
+function readSavedProfile(): SavedCustomerProfile {
+  if (typeof window === 'undefined') return {};
+  try {
+    const saved = localStorage.getItem(CUSTOMER_PROFILE_KEY);
+    if (saved) {
+      return JSON.parse(saved) || {};
+    }
+  } catch {}
+  return {};
+}
 
 export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const {
@@ -43,13 +65,24 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     globalDeliveryFee,
   } = useApp();
 
-  const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD'>('EFECTIVO');
-  const [customerName, setCustomerName] = useState<string>('');
-  const [customerPhone, setCustomerPhone] = useState<string>('');
-  const [deliveryNeighborhood, setDeliveryNeighborhood] = useState<string>('');
-  const [deliveryStreet, setDeliveryStreet] = useState<string>('');
-  const [deliveryReference, setDeliveryReference] = useState<string>('');
-  const [orderNotes, setOrderNotes] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD'>(() => {
+    const p = readSavedProfile();
+    return p.paymentMethod || 'EFECTIVO';
+  });
+  const [customerName, setCustomerName] = useState<string>(() => readSavedProfile().customerName || '');
+  const [customerPhone, setCustomerPhone] = useState<string>(() =>
+    String(readSavedProfile().customerPhone || '')
+      .replace(/\D/g, '')
+      .slice(0, 10)
+  );
+  const [deliveryNeighborhood, setDeliveryNeighborhood] = useState<string>(
+    () => readSavedProfile().deliveryNeighborhood || ''
+  );
+  const [deliveryStreet, setDeliveryStreet] = useState<string>(() => readSavedProfile().deliveryStreet || '');
+  const [deliveryReference, setDeliveryReference] = useState<string>(
+    () => readSavedProfile().deliveryReference || ''
+  );
+  const [orderNotes, setOrderNotes] = useState<string>(() => readSavedProfile().orderNotes || '');
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [checkoutStage, setCheckoutStage] = useState<'IDLE' | 'SENDING' | 'CONFIRMED'>('IDLE');
@@ -60,22 +93,70 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const [draftOrderId, setDraftOrderId] = useState<string | null>(null);
   const [draftOrderNumber, setDraftOrderNumber] = useState<string | null>(null);
 
-  // Cargar datos frecuentes del cliente desde localStorage al montar
+  // Cargar datos completos del cliente desde localStorage al abrir el cajón o montar
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(CUSTOMER_PROFILE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed.customerName) setCustomerName(parsed.customerName);
-          if (parsed.customerPhone) setCustomerPhone(String(parsed.customerPhone).replace(/\D/g, '').slice(0, 10));
-          if (parsed.deliveryNeighborhood) setDeliveryNeighborhood(parsed.deliveryNeighborhood);
-          if (parsed.deliveryStreet) setDeliveryStreet(parsed.deliveryStreet);
-          if (parsed.deliveryReference) setDeliveryReference(parsed.deliveryReference);
-        }
-      } catch {}
+    if (!isOpen) return;
+    const parsed = readSavedProfile();
+    if (parsed.customerName) setCustomerName((prev) => prev || parsed.customerName || '');
+    if (parsed.customerPhone) {
+      const clean = String(parsed.customerPhone).replace(/\D/g, '').slice(0, 10);
+      setCustomerPhone((prev) => prev || clean);
     }
-  }, []);
+    if (parsed.deliveryNeighborhood) {
+      setDeliveryNeighborhood((prev) => prev || parsed.deliveryNeighborhood || '');
+    }
+    if (parsed.deliveryStreet) {
+      setDeliveryStreet((prev) => prev || parsed.deliveryStreet || '');
+    }
+    if (parsed.deliveryReference !== undefined) {
+      setDeliveryReference((prev) => prev || parsed.deliveryReference || '');
+    }
+    if (parsed.orderNotes !== undefined) {
+      setOrderNotes((prev) => prev || parsed.orderNotes || '');
+    }
+    if (parsed.paymentMethod) {
+      setPaymentMethod(parsed.paymentMethod);
+    }
+  }, [isOpen]);
+
+  // Guardar automáticamente en localStorage cada cambio que haga el cliente en sus datos
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hasAnyData =
+      customerName.trim() ||
+      customerPhone.trim() ||
+      deliveryNeighborhood.trim() ||
+      deliveryStreet.trim() ||
+      deliveryReference.trim() ||
+      orderNotes.trim();
+
+    if (!hasAnyData) return;
+
+    try {
+      const existing = readSavedProfile();
+      localStorage.setItem(
+        CUSTOMER_PROFILE_KEY,
+        JSON.stringify({
+          ...existing,
+          customerName,
+          customerPhone: customerPhone.replace(/\D/g, '').slice(0, 10),
+          deliveryNeighborhood,
+          deliveryStreet,
+          deliveryReference,
+          orderNotes,
+          paymentMethod,
+        })
+      );
+    } catch {}
+  }, [
+    customerName,
+    customerPhone,
+    deliveryNeighborhood,
+    deliveryStreet,
+    deliveryReference,
+    orderNotes,
+    paymentMethod,
+  ]);
 
   // Reiniciar borrador si el contenido de la canasta cambia
   useEffect(() => {
@@ -84,6 +165,11 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   }, [cart.length, cartSubtotal]);
 
   const currentRestaurant = restaurants.find((r) => r.id === cartRestaurantId);
+  const placedOrderRestaurant = placedOrder
+    ? restaurants.find(
+        (r) => r.id === placedOrder.restaurantId || r.name === placedOrder.restaurantName
+      )
+    : undefined;
 
   // Filtrar métodos de pago habilitados por el restaurante actual
   const availablePaymentMethods = useMemo(() => {
@@ -122,30 +208,31 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const isBelowMinOrder = minOrderAmount > 0 && cartSubtotal < minOrderAmount;
 
   // Obtener cuenta de transferencia del negocio según el medio elegido
-  const getTransferAccountInfo = (method: string) => {
-    const fallbackPhone = (currentRestaurant?.phone || '3004567890').replace(/\D/g, '');
+  const getTransferAccountInfo = (method: string, targetRest?: Restaurant) => {
+    const rest = targetRest || currentRestaurant || placedOrderRestaurant;
+    const fallbackPhone = (rest?.phone || '3004567890').replace(/\D/g, '');
     if (method === 'NEQUI') {
       return {
         label: 'Cuenta Nequi del Restaurante',
-        value: currentRestaurant?.nequiNumber || fallbackPhone,
+        value: rest?.nequiNumber || fallbackPhone,
       };
     }
     if (method === 'DAVIPLATA') {
       return {
         label: 'Daviplata del Restaurante',
-        value: currentRestaurant?.daviplataNumber || fallbackPhone,
+        value: rest?.daviplataNumber || fallbackPhone,
       };
     }
     if (method === 'BRE_B') {
       return {
         label: 'Llave Bre-B del Restaurante',
-        value: currentRestaurant?.brebKey || fallbackPhone,
+        value: rest?.brebKey || fallbackPhone,
       };
     }
     return null;
   };
 
-  const activeTransferInfo = getTransferAccountInfo(paymentMethod);
+  const activeTransferInfo = getTransferAccountInfo(paymentMethod, currentRestaurant);
 
   const handleCopyAccount = (val: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -153,6 +240,54 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     }
     setCopiedAccount(true);
     setTimeout(() => setCopiedAccount(false), 2500);
+  };
+
+  // Generador de mensaje de WhatsApp con formato para Colombia
+  const generateWhatsAppUrl = (order: Order) => {
+    const targetRest =
+      restaurants.find((r) => r.id === order.restaurantId || r.name === order.restaurantName) ||
+      currentRestaurant;
+    const rawPhone = targetRest?.phone || '3004567890';
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    const phoneWithCountry = cleanPhone.startsWith('57') ? cleanPhone : `57${cleanPhone}`;
+
+    const itemsSummary = order.items
+      .map((it) => {
+        let text = `• *${it.quantity}x* ${it.productName} (${formatCOP(it.subtotal)})`;
+        if (it.selectedOptions && it.selectedOptions.length > 0) {
+          text += `\n  _Opciones: ${it.selectedOptions.map((o) => `${o.itemName}`).join(', ')}_`;
+        }
+        if (it.notes) {
+          text += `\n  _Nota: ${it.notes}_`;
+        }
+        return text;
+      })
+      .join('\n');
+
+    const transferNote =
+      order.paymentMethod !== 'EFECTIVO'
+        ? `\n_Adjunto comprobante de transferencia (${order.paymentMethod})._`
+        : '';
+
+    const message = `*¡Hola ${targetRest?.name || order.restaurantName || 'DonDomi'}! Acabo de hacer un pedido por la plataforma:*
+
+*Orden:* #${order.orderNumber}
+*Cliente:* ${order.customerName}
+*Teléfono:* ${order.customerPhone}
+*Dirección:* ${order.deliveryAddress.neighborhood}, ${order.deliveryAddress.street}
+${order.deliveryAddress.reference ? `*Referencia:* ${order.deliveryAddress.reference}\n` : ''}
+*Platos:*
+${itemsSummary}
+
+*Subtotal:* ${formatCOP(order.subtotal)}
+*Domicilio:* ${formatCOP(order.deliveryFee)}
+*Total a pagar:* *${formatCOP(order.total)}*
+*Método de Pago:* ${order.paymentMethod}${transferNote}
+${order.customerNotes ? `\n*Observaciones:* ${order.customerNotes}` : ''}
+
+_¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
+
+    return `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(message)}`;
   };
 
   const handleCheckout = async (e: React.FormEvent) => {
@@ -200,7 +335,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       }
     }
 
-    // Guardar perfil de entrega del cliente en localStorage para próximas compras
+    // Guardar perfil completo de entrega del cliente en localStorage para próximas compras
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(
@@ -211,6 +346,8 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
             deliveryNeighborhood: deliveryNeighborhood.trim(),
             deliveryStreet: deliveryStreet.trim(),
             deliveryReference: deliveryReference.trim(),
+            orderNotes: orderNotes.trim(),
+            paymentMethod,
           })
         );
       } catch {}
@@ -267,12 +404,20 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
         : '30–45 min',
     };
 
+    const whatsappUrl = generateWhatsAppUrl(newOrder);
+
     setIsSubmitting(true);
     setCheckoutStage('SENDING');
 
     try {
-      const minAnimationTimer = new Promise((resolve) => setTimeout(resolve, 1500));
+      const minAnimationTimer = new Promise((resolve) => setTimeout(resolve, 900));
       await Promise.all([addOrder(newOrder), minAnimationTimer]);
+
+      // CRÍTICO: Vaciar la canasta inmediatamente tras confirmar la orden en base de datos
+      // para impedir cualquier envío duplicado o que la canasta permanezca activa
+      clearCart();
+      setDraftOrderId(null);
+      setDraftOrderNumber(null);
 
       if (typeof window !== 'undefined') {
         let activeOrders: string[] = [];
@@ -292,13 +437,15 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
         localStorage.setItem('dondomi_active_order_time', Date.now().toString());
       }
 
-      setCheckoutStage('CONFIRMED');
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-
       setPlacedOrder(newOrder);
-      setDraftOrderId(null);
-      setDraftOrderNumber(null);
+      setCheckoutStage('CONFIRMED');
+      await new Promise((resolve) => setTimeout(resolve, 600));
       setCheckoutStage('IDLE');
+
+      // Redirigir automáticamente al cliente a WhatsApp después de hacer el pedido
+      if (typeof window !== 'undefined') {
+        window.location.href = whatsappUrl;
+      }
     } catch (err: any) {
       setCheckoutStage('IDLE');
       console.error('Error durante el checkout:', err);
@@ -308,52 +455,15 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     }
   };
 
-  // Generador de mensaje de WhatsApp con formato para Colombia
-  const generateWhatsAppUrl = (order: Order) => {
-    const rawPhone = currentRestaurant?.phone || '3004567890';
-    const cleanPhone = rawPhone.replace(/\D/g, '');
-    const phoneWithCountry = cleanPhone.startsWith('57') ? cleanPhone : `57${cleanPhone}`;
+  const placedTransferInfo = placedOrder
+    ? getTransferAccountInfo(placedOrder.paymentMethod, placedOrderRestaurant)
+    : null;
 
-    const itemsSummary = order.items
-      .map((it) => {
-        let text = `• *${it.quantity}x* ${it.productName} (${formatCOP(it.subtotal)})`;
-        if (it.selectedOptions && it.selectedOptions.length > 0) {
-          text += `\n  _Opciones: ${it.selectedOptions.map((o) => `${o.itemName}`).join(', ')}_`;
-        }
-        if (it.notes) {
-          text += `\n  _Nota: ${it.notes}_`;
-        }
-        return text;
-      })
-      .join('\n');
-
-    const transferNote =
-      order.paymentMethod !== 'EFECTIVO'
-        ? `\n_Adjunto comprobante de transferencia (${order.paymentMethod})._`
-        : '';
-
-    const message = `*¡Hola ${currentRestaurant?.name || 'DonDomi'}! Acabo de hacer un pedido por la plataforma:*
-
-*Orden:* #${order.orderNumber}
-*Cliente:* ${order.customerName}
-*Teléfono:* ${order.customerPhone}
-*Dirección:* ${order.deliveryAddress.neighborhood}, ${order.deliveryAddress.street}
-${order.deliveryAddress.reference ? `*Referencia:* ${order.deliveryAddress.reference}\n` : ''}
-*Platos:*
-${itemsSummary}
-
-*Subtotal:* ${formatCOP(order.subtotal)}
-*Domicilio:* ${formatCOP(order.deliveryFee)}
-*Total a pagar:* *${formatCOP(order.total)}*
-*Método de Pago:* ${order.paymentMethod}${transferNote}
-${order.customerNotes ? `\n*Observaciones:* ${order.customerNotes}` : ''}
-
-_¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
-
-    return `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(message)}`;
+  const handleCloseDrawer = () => {
+    setPlacedOrder(null);
+    setCheckoutError(null);
+    onClose();
   };
-
-  const placedTransferInfo = placedOrder ? getTransferAccountInfo(placedOrder.paymentMethod) : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
@@ -366,12 +476,15 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-sm">Tu Pedido</h3>
-              <p className="text-xs text-slate-500 line-clamp-1">{cartRestaurantName || 'DonDomi'}</p>
+              <p className="text-xs text-slate-500 line-clamp-1">
+                {cartRestaurantName || placedOrder?.restaurantName || 'DonDomi'}
+              </p>
             </div>
           </div>
           <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition"
+            type="button"
+            onClick={handleCloseDrawer}
+            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -393,7 +506,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 Enviando tu pedido a la cocina...
               </h4>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Conectando en tiempo real con <strong>{cartRestaurantName || 'el restaurante'}</strong> en Valledupar. Por favor no cierres la pantalla.
+                Conectando en tiempo real con <strong>{cartRestaurantName || placedOrder?.restaurantName || 'el restaurante'}</strong> en Valledupar. Por favor no cierres la pantalla.
               </p>
             </div>
             <div className="w-48 bg-slate-100 rounded-full h-2 overflow-hidden shadow-inner">
@@ -410,10 +523,10 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 ¡Recibido con Éxito!
               </span>
               <h4 className="text-xl font-black text-slate-900 tracking-tight">
-                ¡Pedido confirmado con éxito!
+                ¡Pedido confirmado! Abriendo WhatsApp...
               </h4>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Tu orden fue recibida por la cocina. Generando pase de rastreo en vivo...
+                Tu canasta fue procesada y estamos redirigiéndote al WhatsApp del restaurante.
               </p>
             </div>
           </div>
@@ -473,11 +586,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
 
             <Link
               href={`/order/${placedOrder.orderNumber}`}
-              onClick={() => {
-                clearCart();
-                setPlacedOrder(null);
-                onClose();
-              }}
+              onClick={handleCloseDrawer}
               className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-orange-600/25 flex items-center justify-center gap-2 text-sm transition"
             >
               <span>🛵 Rastrear mi Pedido en Tiempo Real</span>
@@ -492,18 +601,15 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               <MessageCircle className="w-4 h-4" />
               <span>
                 {placedOrder.paymentMethod === 'EFECTIVO'
-                  ? 'Enviar Copia por WhatsApp al Restaurante'
+                  ? 'Abrir WhatsApp del Restaurante nuevamente'
                   : 'Enviar Comprobante de Pago por WhatsApp'}
               </span>
             </a>
 
             <button
-              onClick={() => {
-                clearCart();
-                setPlacedOrder(null);
-                onClose();
-              }}
-              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-2xl text-xs transition"
+              type="button"
+              onClick={handleCloseDrawer}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-2xl text-xs transition cursor-pointer"
             >
               Cerrar y volver
             </button>
@@ -518,21 +624,39 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
             <div className="p-4 overflow-y-auto space-y-4 flex-1 divide-y divide-slate-100">
               {/* Platos seleccionados */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-                    Platos seleccionados
-                  </span>
-                  {minOrderAmount > 0 && (
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        isBelowMinOrder
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}
-                    >
-                      Mínimo: {formatCOP(minOrderAmount)}
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                      Platos seleccionados
                     </span>
-                  )}
+                    {minOrderAmount > 0 && (
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          isBelowMinOrder
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}
+                      >
+                        Mínimo: {formatCOP(minOrderAmount)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Botón para eliminar la canasta completa */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearCart();
+                      setDraftOrderId(null);
+                      setDraftOrderNumber(null);
+                      setCheckoutError(null);
+                      onClose();
+                    }}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-red-600 hover:text-white bg-red-50 hover:bg-red-600 border border-red-200 hover:border-red-600 px-2.5 py-1 rounded-xl transition cursor-pointer active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Vaciar canasta</span>
+                  </button>
                 </div>
 
                 {cart.map((item) => (

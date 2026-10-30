@@ -9,9 +9,22 @@ import { Order, OrderStatus } from '@/types';
 export default function ActiveOrderBanner() {
   const { orders } = useApp();
   const [activeOrderNumbers, setActiveOrderNumbers] = useState<string[]>([]);
+  const [dismissedOrderKeys, setDismissedOrderKeys] = useState<string[]>([]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      let dismissed: string[] = [];
+      try {
+        const storedDismissed = localStorage.getItem('dondomi_dismissed_orders');
+        if (storedDismissed) {
+          const parsed = JSON.parse(storedDismissed);
+          if (Array.isArray(parsed)) {
+            dismissed = parsed.map((item) => String(item).toLowerCase());
+          }
+        }
+      } catch {}
+      setDismissedOrderKeys(dismissed);
+
       let list: string[] = [];
       try {
         const stored = localStorage.getItem('dondomi_active_orders');
@@ -22,25 +35,38 @@ export default function ActiveOrderBanner() {
       } catch {}
 
       const single = localStorage.getItem('dondomi_active_order');
-      if (single && !list.includes(single)) {
+      if (
+        single &&
+        !list.includes(single) &&
+        !dismissed.includes(single.toLowerCase())
+      ) {
         list.push(single);
       }
 
-      setActiveOrderNumbers(list);
+      const filteredList = list.filter(
+        (num) => !dismissed.includes(String(num).toLowerCase())
+      );
+
+      setActiveOrderNumbers(filteredList);
     }
   }, [orders]);
 
   if (activeOrderNumbers.length === 0) return null;
 
-  // Filtrar pedidos encontrados en el estado global
-  const activeOrders = orders.filter((o) =>
-    activeOrderNumbers.some(
+  // Filtrar pedidos encontrados en el estado global y excluir los descartados con "Entendido"
+  const activeOrders = orders.filter((o) => {
+    const isDismissed =
+      dismissedOrderKeys.includes(o.orderNumber.toLowerCase()) ||
+      dismissedOrderKeys.includes(o.id.toLowerCase());
+    if (isDismissed) return false;
+
+    return activeOrderNumbers.some(
       (num) =>
         o.orderNumber.toLowerCase() === num.toLowerCase() ||
-        o.id === num ||
+        o.id.toLowerCase() === num.toLowerCase() ||
         o.orderNumber.toLowerCase() === `dd-${num}`.toLowerCase()
-    )
-  );
+    );
+  });
 
   // Filtrar por vigencia (pedidos activos no expiran; pedidos entregados se retiran tras 3 horas)
   const validOrders = activeOrders.filter((order) => {
@@ -71,11 +97,44 @@ export default function ActiveOrderBanner() {
     }
   };
 
-  const handleAcknowledgeCancelled = (orderNumber: string) => {
-    const updated = activeOrderNumbers.filter((n) => n.toLowerCase() !== orderNumber.toLowerCase());
+  const handleAcknowledgeCancelled = (order: Order) => {
+    const orderNumLower = order.orderNumber.toLowerCase();
+    const orderIdLower = order.id.toLowerCase();
+
+    const nextDismissed = Array.from(
+      new Set([...dismissedOrderKeys, orderNumLower, orderIdLower])
+    );
+    setDismissedOrderKeys(nextDismissed);
+
+    const updated = activeOrderNumbers.filter((n) => {
+      const lower = n.toLowerCase();
+      return (
+        lower !== orderNumLower &&
+        lower !== orderIdLower &&
+        `dd-${lower}` !== orderNumLower
+      );
+    });
     setActiveOrderNumbers(updated);
+
     if (typeof window !== 'undefined') {
-      localStorage.setItem('dondomi_active_orders', JSON.stringify(updated));
+      try {
+        localStorage.setItem('dondomi_dismissed_orders', JSON.stringify(nextDismissed));
+        localStorage.setItem('dondomi_active_orders', JSON.stringify(updated));
+
+        const single = localStorage.getItem('dondomi_active_order');
+        if (
+          single &&
+          (single.toLowerCase() === orderNumLower ||
+            single.toLowerCase() === orderIdLower ||
+            `dd-${single.toLowerCase()}` === orderNumLower)
+        ) {
+          if (updated.length > 0) {
+            localStorage.setItem('dondomi_active_order', updated[0]);
+          } else {
+            localStorage.removeItem('dondomi_active_order');
+          }
+        }
+      } catch {}
     }
   };
 
@@ -124,7 +183,7 @@ export default function ActiveOrderBanner() {
 
               <button
                 type="button"
-                onClick={() => handleAcknowledgeCancelled(order.orderNumber)}
+                onClick={() => handleAcknowledgeCancelled(order)}
                 className="flex-shrink-0 bg-red-600 hover:bg-red-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl transition shadow-xs whitespace-nowrap cursor-pointer"
               >
                 Entendido

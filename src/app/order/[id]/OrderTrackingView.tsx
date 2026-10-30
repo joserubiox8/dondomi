@@ -121,7 +121,12 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
   );
 
   useEffect(() => {
-    if (order && typeof window !== 'undefined') {
+    if (
+      order &&
+      order.status !== 'CANCELLED' &&
+      order.status !== 'DELIVERED' &&
+      typeof window !== 'undefined'
+    ) {
       localStorage.setItem('dondomi_active_order', order.orderNumber);
     }
   }, [order]);
