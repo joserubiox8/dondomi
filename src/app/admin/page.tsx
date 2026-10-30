@@ -1,48 +1,61 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   Shield,
   Store,
   Bike,
   ShoppingBag,
-  TrendingUp,
-  DollarSign,
-  MapPin,
-  Clock,
   ArrowUpRight,
   Plus,
   Eye,
   X,
   Trash2,
   Edit2,
-  Phone,
   Check,
   Lock,
   Unlock,
-  KeyRound,
   AlertCircle,
   Megaphone,
-  Save,
-  LogOut,
   Sliders,
   Layers,
-  Percent,
+  Search,
+  Wallet,
+  Users,
+  Download,
+  Printer,
+  UtensilsCrossed,
+  Star,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
-import { Restaurant, FoodCategory, Driver, Order } from '@/types';
+import {
+  filterOrdersByPeriod,
+  calculateRestaurantSettlement,
+  calculateDriverSettlement,
+  SettlementPeriod,
+} from '@/lib/pricing';
+import { Restaurant, FoodCategory, Driver, Order, OrderStatus } from '@/types';
 
-type AdminTab = 'CATEGORIAS' | 'RESTAURANTES' | 'DOMICILIARIOS' | 'PEDIDOS' | 'AJUSTES';
+type AdminTab =
+  | 'RESTAURANTES'
+  | 'PEDIDOS'
+  | 'FINANZAS'
+  | 'DOMICILIARIOS'
+  | 'CLIENTES'
+  | 'CATEGORIAS';
+
+type RestStatusFilter = 'TODOS' | 'ABIERTOS' | 'PAUSADOS' | 'SUSPENDIDOS' | 'ARCHIVADOS';
 
 export default function AdminPage() {
-  const router = useRouter();
   const {
     restaurants,
     addRestaurant,
+    updateRestaurant,
     toggleRestaurantStatus,
+    productsByRestaurant,
+    toggleProductAvailability,
     orders,
     categories,
     addCategory,
@@ -54,13 +67,19 @@ export default function AdminPage() {
     setGlobalAnnouncement,
     drivers,
     addDriver,
+    updateDriver,
     toggleDriverStatus,
+    toggleDriverAvailability,
     updateOrderStatus,
+    assignDriverByAdmin,
+    unclaimOrder,
+    confirmOrderPayment,
     currentUser,
     logout,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<AdminTab>('CATEGORIAS');
+  const [activeTab, setActiveTab] = useState<AdminTab>('RESTAURANTES');
+  const [period, setPeriod] = useState<SettlementPeriod>('ALL');
 
   // Autenticación Master
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
@@ -112,6 +131,214 @@ export default function AdminPage() {
   };
 
   // ==============================================================
+  // FILTROS Y ESTADOS DE RESTAURANTES (CREAR / EDITAR / INSPECCIONAR)
+  // ==============================================================
+  const [restSearch, setRestSearch] = useState('');
+  const [restFilter, setRestFilter] = useState<RestStatusFilter>('TODOS');
+  const [isRestModalOpen, setIsRestModalOpen] = useState(false);
+  const [editingRest, setEditingRest] = useState<Restaurant | null>(null);
+  const [inspectingRest, setInspectingRest] = useState<Restaurant | null>(null);
+
+  const [restName, setRestName] = useState('');
+  const [restNeighborhood, setRestNeighborhood] = useState('Centro Histórico');
+  const [restAddress, setRestAddress] = useState('');
+  const [restPhone, setRestPhone] = useState('');
+  const [restEmail, setRestEmail] = useState('');
+  const [restHours, setRestHours] = useState('11:00 AM - 10:00 PM');
+  const [restCommission, setRestCommission] = useState<number>(0);
+  const [restMinOrder, setRestMinOrder] = useState<number>(15000);
+  const [restTimeMin, setRestTimeMin] = useState<number>(25);
+  const [restTimeMax, setRestTimeMax] = useState<number>(40);
+  const [restPin, setRestPin] = useState('1234');
+  const [restAccountStatus, setRestAccountStatus] = useState<'ACTIVE' | 'SUSPENDED' | 'ARCHIVED'>('ACTIVE');
+  const [restAcceptsCash, setRestAcceptsCash] = useState(true);
+  const [restAcceptsNequi, setRestAcceptsNequi] = useState(true);
+  const [restAcceptsBreb, setRestAcceptsBreb] = useState(true);
+  const [restAcceptsDaviplata, setRestAcceptsDaviplata] = useState(true);
+  const [restNequiNumber, setRestNequiNumber] = useState('');
+  const [restDaviplataNumber, setRestDaviplataNumber] = useState('');
+  const [restBrebKey, setRestBrebKey] = useState('');
+  const [restFormError, setRestFormError] = useState<string | null>(null);
+
+  const handleOpenCreateRest = () => {
+    setRestFormError(null);
+    setEditingRest(null);
+    setRestName('');
+    setRestNeighborhood('Centro Histórico');
+    setRestAddress('');
+    setRestPhone('');
+    setRestEmail('');
+    setRestHours('11:00 AM - 10:00 PM');
+    setRestCommission(0);
+    setRestMinOrder(15000);
+    setRestTimeMin(25);
+    setRestTimeMax(40);
+    setRestPin('1234');
+    setRestAccountStatus('ACTIVE');
+    setRestAcceptsCash(true);
+    setRestAcceptsNequi(true);
+    setRestAcceptsBreb(true);
+    setRestAcceptsDaviplata(true);
+    setRestNequiNumber('');
+    setRestDaviplataNumber('');
+    setRestBrebKey('');
+    setIsRestModalOpen(true);
+  };
+
+  const handleOpenEditRest = (r: Restaurant) => {
+    setRestFormError(null);
+    setEditingRest(r);
+    setRestName(r.name);
+    setRestNeighborhood(r.neighborhood);
+    setRestAddress(r.address);
+    setRestPhone(r.phone.replace(/\D/g, '').slice(0, 10));
+    setRestEmail(r.email || `${r.slug}@dondomi.com`);
+    setRestHours(r.openingHours || '11:00 AM - 10:00 PM');
+    setRestCommission(r.commissionRate || 0);
+    setRestMinOrder(r.minOrderAmount || 15000);
+    setRestTimeMin(r.estimatedTimeMin || 25);
+    setRestTimeMax(r.estimatedTimeMax || 40);
+    setRestPin(r.pin || '1234');
+    setRestAccountStatus(r.accountStatus || 'ACTIVE');
+    setRestAcceptsCash(r.acceptsCash !== false);
+    setRestAcceptsNequi(r.acceptsNequi !== false);
+    setRestAcceptsBreb(r.acceptsBreb !== false);
+    setRestAcceptsDaviplata(r.acceptsDaviplata !== false);
+    setRestNequiNumber(r.nequiNumber || '');
+    setRestDaviplataNumber(r.daviplataNumber || '');
+    setRestBrebKey(r.brebKey || '');
+    setIsRestModalOpen(true);
+  };
+
+  const handleSaveRestaurant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRestFormError(null);
+    const cleanPhone = restPhone.replace(/\D/g, '');
+    if (!restName.trim() || cleanPhone.length !== 10) {
+      setRestFormError('Ingresa el nombre del restaurante y un celular válido de 10 dígitos.');
+      return;
+    }
+
+    const slug =
+      editingRest?.slug ||
+      restName
+        .trim()
+        .toLowerCase()
+        .replace(/[\s\W]+/g, '-');
+
+    if (editingRest) {
+      const updated: Restaurant = {
+        ...editingRest,
+        name: restName.trim(),
+        neighborhood: restNeighborhood.trim(),
+        address: restAddress.trim() || 'Valledupar, Cesar',
+        phone: cleanPhone,
+        email: restEmail.trim() || `${slug}@dondomi.com`,
+        openingHours: restHours.trim(),
+        commissionRate: Number(restCommission) || 0,
+        minOrderAmount: Number(restMinOrder) || 0,
+        estimatedTimeMin: Number(restTimeMin) || 25,
+        estimatedTimeMax: Number(restTimeMax) || 40,
+        pin: restPin.trim() || '1234',
+        accountStatus: restAccountStatus,
+        isOpen: restAccountStatus === 'ACTIVE' ? editingRest.isOpen : false,
+        acceptsCash: restAcceptsCash,
+        acceptsNequi: restAcceptsNequi,
+        acceptsBreb: restAcceptsBreb,
+        acceptsDaviplata: restAcceptsDaviplata,
+        nequiNumber: restNequiNumber.trim() || undefined,
+        daviplataNumber: restDaviplataNumber.trim() || undefined,
+        brebKey: restBrebKey.trim() || undefined,
+      };
+      await updateRestaurant(updated);
+      showNotice(`✅ Restaurante "${updated.name}" actualizado`);
+    } else {
+      const created: Restaurant = {
+        id: `rest-${Date.now()}`,
+        name: restName.trim(),
+        slug,
+        description: `Restaurante afiliado a DonDomi en ${restNeighborhood.trim()}, Valledupar.`,
+        logoUrl:
+          'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=200&q=80',
+        bannerUrl:
+          'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80',
+        rating: 5.0,
+        reviewsCount: 1,
+        tags: ['Local', 'Valledupar'],
+        address: restAddress.trim() || 'Valledupar, Cesar',
+        neighborhood: restNeighborhood.trim(),
+        phone: cleanPhone,
+        email: restEmail.trim() || `${slug}@dondomi.com`,
+        isOpen: restAccountStatus === 'ACTIVE',
+        accountStatus: restAccountStatus,
+        openingHours: restHours.trim(),
+        estimatedTimeMin: Number(restTimeMin) || 25,
+        estimatedTimeMax: Number(restTimeMax) || 40,
+        deliveryFeeBase: globalDeliveryFee,
+        minOrderAmount: Number(restMinOrder) || 15000,
+        commissionRate: Number(restCommission) || 0,
+        pin: restPin.trim() || '1234',
+        acceptsCash: restAcceptsCash,
+        acceptsNequi: restAcceptsNequi,
+        acceptsBreb: restAcceptsBreb,
+        acceptsDaviplata: restAcceptsDaviplata,
+        nequiNumber: restNequiNumber.trim() || undefined,
+        daviplataNumber: restDaviplataNumber.trim() || undefined,
+        brebKey: restBrebKey.trim() || undefined,
+        featured: false,
+      };
+      await addRestaurant(created);
+      showNotice(`🎉 Restaurante "${created.name}" afiliado con éxito`);
+    }
+
+    setIsRestModalOpen(false);
+  };
+
+  const handleQuickRestAccountStatus = async (
+    rest: Restaurant,
+    status: 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED'
+  ) => {
+    const updated: Restaurant = {
+      ...rest,
+      accountStatus: status,
+      isOpen: status === 'ACTIVE' ? rest.isOpen : false,
+    };
+    await updateRestaurant(updated);
+    showNotice(
+      status === 'ACTIVE'
+        ? `🟢 "${rest.name}" reactivado en el catálogo`
+        : status === 'SUSPENDED'
+        ? `⏸️ "${rest.name}" suspendido temporalmente del catálogo`
+        : `📦 "${rest.name}" archivado`
+    );
+  };
+
+  const filteredRestaurants = useMemo(() => {
+    return restaurants.filter((r) => {
+      const accStatus = r.accountStatus || 'ACTIVE';
+      const matchesStatus =
+        restFilter === 'TODOS'
+          ? accStatus !== 'ARCHIVED'
+          : restFilter === 'ABIERTOS'
+          ? accStatus === 'ACTIVE' && r.isOpen
+          : restFilter === 'PAUSADOS'
+          ? accStatus === 'ACTIVE' && !r.isOpen
+          : restFilter === 'SUSPENDIDOS'
+          ? accStatus === 'SUSPENDED'
+          : accStatus === 'ARCHIVED';
+
+      const q = restSearch.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        r.name.toLowerCase().includes(q) ||
+        r.neighborhood.toLowerCase().includes(q) ||
+        r.phone.includes(q);
+
+      return matchesStatus && matchesSearch;
+    });
+  }, [restaurants, restFilter, restSearch]);
+
+  // ==============================================================
   // MODAL: CATEGORÍA DE COMIDA ("¿Qué se te antoja hoy?")
   // ==============================================================
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -120,6 +347,7 @@ export default function AdminPage() {
   const [catSlug, setCatSlug] = useState('');
   const [catIcon, setCatIcon] = useState('🍟');
   const [catBadge, setCatBadge] = useState('');
+  const [categoryToDelete, setCategoryToDelete] = useState<{ id: string; name: string } | null>(null);
 
   const handleOpenAddCategory = () => {
     setEditingCategory(null);
@@ -170,12 +398,6 @@ export default function AdminPage() {
     setIsCategoryModalOpen(false);
   };
 
-  const [categoryToDelete, setCategoryToDelete] = useState<{ id: string; name: string } | null>(null);
-
-  const handleDeleteCategory = (catId: string, name: string) => {
-    setCategoryToDelete({ id: catId, name });
-  };
-
   const handleConfirmDeleteCategory = () => {
     if (!categoryToDelete) return;
     deleteCategory(categoryToDelete.id);
@@ -184,118 +406,311 @@ export default function AdminPage() {
   };
 
   // ==============================================================
-  // MODAL: AFILIAR RESTAURANTE
+  // MODAL: GESTIÓN DE DOMICILIARIOS (CREAR / EDITAR)
   // ==============================================================
-  const [isAddRestModalOpen, setIsAddRestModalOpen] = useState(false);
-  const [newRestName, setNewRestName] = useState('');
-  const [newRestNeighborhood, setNewRestNeighborhood] = useState('Centro Histórico');
-  const [newRestAddress, setNewRestAddress] = useState('');
-  const [newRestPhone, setNewRestPhone] = useState('');
-  const [newRestEmail, setNewRestEmail] = useState('');
-  const [newRestHours, setNewRestHours] = useState('11:00 AM - 10:00 PM');
-  const [newRestCommission, setNewRestCommission] = useState(0);
-  const [newRestPin, setNewRestPin] = useState('1234');
-  const [restFormError, setRestFormError] = useState<string | null>(null);
-
-  const handleAddRestaurant = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRestFormError(null);
-    if (!newRestName.trim() || !newRestPhone.trim()) {
-      setRestFormError('Completa el nombre y teléfono del restaurante.');
-      return;
-    }
-
-    const slug = newRestName.toLowerCase().replace(/[\s\W]+/g, '-');
-    const created: Restaurant = {
-      id: `rest-${Date.now()}`,
-      name: newRestName.trim(),
-      slug,
-      description: `Restaurante afiliado a DonDomi en ${newRestNeighborhood}, Valledupar.`,
-      logoUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=200&q=80',
-      bannerUrl: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80',
-      rating: 5.0,
-      reviewsCount: 1,
-      tags: ['Local', 'Valledupar'],
-      address: newRestAddress.trim() || `Valledupar, Cesar`,
-      neighborhood: newRestNeighborhood.trim(),
-      phone: newRestPhone.trim(),
-      email: newRestEmail.trim() || `${slug}@dondomi.com`,
-      isOpen: true,
-      openingHours: newRestHours,
-      estimatedTimeMin: 25,
-      estimatedTimeMax: 40,
-      deliveryFeeBase: globalDeliveryFee,
-      minOrderAmount: 15000,
-      commissionRate: Number(newRestCommission),
-      pin: newRestPin.trim() || '1234',
-      acceptsCash: true,
-      acceptsNequi: true,
-      acceptsBreb: true,
-      acceptsDaviplata: true,
-      featured: false,
-    };
-
-    await addRestaurant(created);
-    setIsAddRestModalOpen(false);
-    setNewRestName('');
-    setNewRestAddress('');
-    setNewRestPhone('');
-    setNewRestEmail('');
-    showNotice(`🎉 Restaurante "${created.name}" afiliado con éxito`);
-  };
-
-  // ==============================================================
-  // MODAL: REGISTRAR DOMICILIARIO
-  // ==============================================================
-  const [isAddDriverModalOpen, setIsAddDriverModalOpen] = useState(false);
-  const [newDriverName, setNewDriverName] = useState('');
-  const [newDriverPhone, setNewDriverPhone] = useState('');
-  const [newDriverPlate, setNewDriverPlate] = useState('');
-  const [newDriverEmail, setNewDriverEmail] = useState('');
+  const [driverSearch, setDriverSearch] = useState('');
+  const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
+  const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
+  const [drvName, setDrvName] = useState('');
+  const [drvPhone, setDrvPhone] = useState('');
+  const [drvPlate, setDrvPlate] = useState('');
+  const [drvEmail, setDrvEmail] = useState('');
+  const [drvPin, setDrvPin] = useState('domi1234');
+  const [drvVehicle, setDrvVehicle] = useState<'MOTO' | 'BICICLETA' | 'AUTO'>('MOTO');
   const [driverFormError, setDriverFormError] = useState<string | null>(null);
 
-  // Modal para cancelación administrativa forzosa sin prompt
-  const [adminCancellingOrder, setAdminCancellingOrder] = useState<Order | null>(null);
-  const [adminCancelReason, setAdminCancelReason] = useState<string>('Intervención de soporte administrativo');
+  const handleOpenAddDriver = () => {
+    setDriverFormError(null);
+    setEditingDriver(null);
+    setDrvName('');
+    setDrvPhone('');
+    setDrvPlate('');
+    setDrvEmail('');
+    setDrvPin('domi1234');
+    setDrvVehicle('MOTO');
+    setIsDriverModalOpen(true);
+  };
 
-  const handleAddDriver = (e: React.FormEvent) => {
+  const handleOpenEditDriver = (drv: Driver) => {
+    setDriverFormError(null);
+    setEditingDriver(drv);
+    setDrvName(drv.name);
+    setDrvPhone(drv.phone.replace(/\D/g, '').slice(0, 10));
+    setDrvPlate(drv.plate);
+    setDrvEmail(drv.email);
+    setDrvPin(drv.pin || 'domi1234');
+    setDrvVehicle(drv.vehicleType || 'MOTO');
+    setIsDriverModalOpen(true);
+  };
+
+  const handleSaveDriver = async (e: React.FormEvent) => {
     e.preventDefault();
     setDriverFormError(null);
-    if (!newDriverName.trim() || !newDriverPhone.trim()) {
-      setDriverFormError('Completa el nombre y teléfono del domiciliario.');
+    const cleanPhone = drvPhone.replace(/\D/g, '');
+    if (!drvName.trim() || cleanPhone.length !== 10) {
+      setDriverFormError('Ingresa el nombre del domiciliario y un celular válido de 10 dígitos.');
       return;
     }
 
-    const driver: Driver = {
-      id: `drv-${Date.now()}`,
-      name: newDriverName.trim(),
-      phone: newDriverPhone.trim(),
-      plate: newDriverPlate.trim() || 'MOTO-01',
-      email: newDriverEmail.trim() || `${newDriverName.toLowerCase().replace(/[\s\W]+/g, '')}@dondomi.com`,
-      isActive: true,
-      totalDeliveries: 0,
-      rating: 5.0,
-      createdAt: new Date().toISOString(),
-    };
+    if (editingDriver) {
+      const updated: Driver = {
+        ...editingDriver,
+        name: drvName.trim(),
+        phone: cleanPhone,
+        plate: drvPlate.trim().toUpperCase() || 'MOTO-01',
+        email:
+          drvEmail.trim() ||
+          `${drvName.toLowerCase().replace(/[\s\W]+/g, '')}@dondomi.com`,
+        pin: drvPin.trim() || 'domi1234',
+        vehicleType: drvVehicle,
+      };
+      await updateDriver(updated);
+      showNotice(`✅ Domiciliario "${updated.name}" actualizado`);
+    } else {
+      const driver: Driver = {
+        id: `drv-${Date.now()}`,
+        name: drvName.trim(),
+        phone: cleanPhone,
+        plate: drvPlate.trim().toUpperCase() || 'MOTO-01',
+        email:
+          drvEmail.trim() ||
+          `${drvName.toLowerCase().replace(/[\s\W]+/g, '')}@dondomi.com`,
+        pin: drvPin.trim() || 'domi1234',
+        vehicleType: drvVehicle,
+        isActive: true,
+        isAvailable: true,
+        totalDeliveries: 0,
+        rating: 5.0,
+        createdAt: new Date().toISOString(),
+      };
+      addDriver(driver);
+      showNotice(`🛵 Domiciliario "${driver.name}" registrado en la flota`);
+    }
 
-    addDriver(driver);
-    setIsAddDriverModalOpen(false);
-    setNewDriverName('');
-    setNewDriverPhone('');
-    setNewDriverPlate('');
-    setNewDriverEmail('');
-    showNotice(`🛵 Domiciliario "${driver.name}" registrado en la flota`);
+    setIsDriverModalOpen(false);
   };
 
-  // Métricas de Plataforma
-  const totalGMV = orders.filter((o) => o.status === 'DELIVERED').reduce((acc, o) => acc + o.total, 0);
-  const deliveredCount = orders.filter((o) => o.status === 'DELIVERED').length;
-  const activeOrdersCount = orders.filter((o) => o.status !== 'DELIVERED' && o.status !== 'CANCELLED').length;
+  const filteredDrivers = useMemo(() => {
+    const q = driverSearch.trim().toLowerCase();
+    return drivers.filter(
+      (d) =>
+        !q ||
+        d.name.toLowerCase().includes(q) ||
+        d.phone.includes(q) ||
+        d.plate.toLowerCase().includes(q)
+    );
+  }, [drivers, driverSearch]);
+
+  // ==============================================================
+  // TORRE DE CONTROL DE PEDIDOS E INTERVENCIÓN
+  // ==============================================================
+  const [orderSearch, setOrderSearch] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('TODOS');
+  const [orderRestFilter, setOrderRestFilter] = useState<string>('TODOS');
+  const [inspectingOrder, setInspectingOrder] = useState<Order | null>(null);
+  const [selectedDriverForOrder, setSelectedDriverForOrder] = useState<string>('');
+  const [adminCancellingOrder, setAdminCancellingOrder] = useState<Order | null>(null);
+  const [adminCancelReason, setAdminCancelReason] = useState<string>(
+    'Intervención de soporte administrativo'
+  );
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter((o) => {
+      const matchesStatus =
+        orderStatusFilter === 'TODOS'
+          ? true
+          : orderStatusFilter === 'ACTIVOS'
+          ? o.status !== 'DELIVERED' && o.status !== 'CANCELLED'
+          : o.status === orderStatusFilter;
+
+      const matchesRest =
+        orderRestFilter === 'TODOS' ||
+        o.restaurantId === orderRestFilter ||
+        o.restaurantName === orderRestFilter;
+
+      const q = orderSearch.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        o.orderNumber.toLowerCase().includes(q) ||
+        o.customerName.toLowerCase().includes(q) ||
+        o.customerPhone.includes(q) ||
+        o.restaurantName.toLowerCase().includes(q);
+
+      return matchesStatus && matchesRest && matchesSearch;
+    });
+  }, [orders, orderStatusFilter, orderRestFilter, orderSearch]);
+
+  // ==============================================================
+  // DIRECTORIO CONSOLIDADO DE CLIENTES
+  // ==============================================================
+  const [customerSearch, setCustomerSearch] = useState('');
+  const customersDirectory = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        phone: string;
+        name: string;
+        neighborhood: string;
+        street: string;
+        totalOrders: number;
+        deliveredCount: number;
+        cancelledCount: number;
+        totalSpent: number;
+        lastOrderAt: string;
+      }
+    >();
+
+    orders.forEach((o) => {
+      const cleanPhone = o.customerPhone.replace(/\D/g, '') || o.customerPhone;
+      const existing = map.get(cleanPhone);
+      const isDelivered = o.status === 'DELIVERED';
+      const isCancelled = o.status === 'CANCELLED';
+
+      if (!existing) {
+        map.set(cleanPhone, {
+          phone: cleanPhone,
+          name: o.customerName,
+          neighborhood: o.deliveryAddress.neighborhood,
+          street: o.deliveryAddress.street,
+          totalOrders: 1,
+          deliveredCount: isDelivered ? 1 : 0,
+          cancelledCount: isCancelled ? 1 : 0,
+          totalSpent: isDelivered ? o.total : 0,
+          lastOrderAt: o.createdAt,
+        });
+      } else {
+        existing.totalOrders += 1;
+        if (isDelivered) {
+          existing.deliveredCount += 1;
+          existing.totalSpent += o.total;
+        }
+        if (isCancelled) {
+          existing.cancelledCount += 1;
+        }
+        if (new Date(o.createdAt).getTime() > new Date(existing.lastOrderAt).getTime()) {
+          existing.name = o.customerName;
+          existing.neighborhood = o.deliveryAddress.neighborhood;
+          existing.street = o.deliveryAddress.street;
+          existing.lastOrderAt = o.createdAt;
+        }
+      }
+    });
+
+    const list = Array.from(map.values()).sort((a, b) => b.totalSpent - a.totalSpent);
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.phone.includes(q) ||
+        c.neighborhood.toLowerCase().includes(q)
+    );
+  }, [orders, customerSearch]);
+
+  // ==============================================================
+  // MÉTRICAS EJECUTIVAS Y ALERTAS OPERATIVAS EN TIEMPO REAL
+  // ==============================================================
+  const periodOrders = useMemo(() => filterOrdersByPeriod(orders, period), [orders, period]);
+  const deliveredInPeriod = periodOrders.filter((o) => o.status === 'DELIVERED');
+  const totalGMV = deliveredInPeriod.reduce((acc, o) => acc + o.total, 0);
+  const totalDeliveryFees = deliveredInPeriod.reduce((acc, o) => acc + o.deliveryFee, 0);
+  const activeOrders = orders.filter(
+    (o) => o.status !== 'DELIVERED' && o.status !== 'CANCELLED'
+  );
+
+  // Alertas operativas en vivo
+  const delayedPendingOrders = activeOrders.filter((o) => {
+    if (o.status !== 'PENDING') return false;
+    const elapsedMin = (Date.now() - new Date(o.createdAt).getTime()) / 60000;
+    return elapsedMin >= 8;
+  });
+  const unassignedReadyOrders = activeOrders.filter(
+    (o) => o.status === 'READY_FOR_PICKUP' && !o.driverId
+  );
+  const incidentOrders = activeOrders.filter((o) => Boolean(o.incidentReason));
+
+  // Liquidaciones por restaurante y por domiciliario en el periodo
+  const restaurantSettlements = useMemo(() => {
+    return restaurants.map((r) => {
+      const rOrders = periodOrders.filter(
+        (o) => o.restaurantId === r.id || o.restaurantName === r.name
+      );
+      const summary = calculateRestaurantSettlement(rOrders, r.commissionRate || 0);
+      return { restaurant: r, summary };
+    });
+  }, [restaurants, periodOrders]);
+
+  const driverSettlements = useMemo(() => {
+    return drivers.map((d) => {
+      const dOrders = periodOrders.filter(
+        (o) => o.driverId === d.id || o.driverName === d.name
+      );
+      const summary = calculateDriverSettlement(dOrders, globalDeliveryFee);
+      return { driver: d, summary };
+    });
+  }, [drivers, periodOrders, globalDeliveryFee]);
+
+  const totalPlatformCommission = restaurantSettlements.reduce(
+    (acc, item) => acc + item.summary.platformCommissionAmount,
+    0
+  );
+
+  // Exportar CSV de liquidaciones y pedidos
+  const handleExportCSV = () => {
+    const headers = [
+      'NumeroPedido',
+      'Fecha',
+      'Restaurante',
+      'Cliente',
+      'Telefono',
+      'Barrio',
+      'MetodoPago',
+      'EstadoPago',
+      'Flota',
+      'Domiciliario',
+      'SubtotalComida',
+      'TarifaDomicilio',
+      'Total',
+      'Estado',
+    ];
+    const rows = periodOrders.map((o) => [
+      o.orderNumber,
+      new Date(o.createdAt).toLocaleString('es-CO'),
+      `"${o.restaurantName.replace(/"/g, '""')}"`,
+      `"${o.customerName.replace(/"/g, '""')}"`,
+      o.customerPhone,
+      `"${o.deliveryAddress.neighborhood.replace(/"/g, '""')}"`,
+      o.paymentMethod,
+      o.paymentStatus,
+      o.deliveryFleet || (o.driverId ? 'DONDOMI' : 'SIN_ASIGNAR'),
+      `"${(o.driverName || '').replace(/"/g, '""')}"`,
+      o.subtotal,
+      o.deliveryFee,
+      o.total,
+      o.status,
+    ]);
+
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute(
+      'download',
+      `dondomi_reporte_${period.toLowerCase()}_${new Date().toISOString().slice(0, 10)}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showNotice('📥 Reporte CSV descargado correctamente');
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20 selection:bg-orange-500 selection:text-white">
       {/* Top Header */}
-      <header className="bg-slate-900 text-white sticky top-0 z-30 px-4 py-3 shadow-md border-b border-slate-800">
+      <header className="bg-slate-900 text-white sticky top-0 z-30 px-4 py-3 shadow-md border-b border-slate-800 print:hidden">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <Link
@@ -314,7 +729,7 @@ export default function AdminPage() {
                   Master Admin
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">Valledupar, Cesar</p>
+              <p className="text-[11px] text-slate-400">Valledupar, Cesar · Gestión Integral</p>
             </div>
           </div>
 
@@ -330,7 +745,7 @@ export default function AdminPage() {
             {isAdminAuthenticated && (
               <button
                 onClick={handleAdminLock}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5 cursor-pointer"
                 title="Bloquear panel maestro"
               >
                 <Lock className="w-3.5 h-3.5" />
@@ -343,7 +758,7 @@ export default function AdminPage() {
 
       {/* Floating Notice */}
       {notice && (
-        <div className="fixed top-16 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold border border-slate-700 animate-in slide-in-from-top-2">
+        <div className="fixed top-16 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold border border-slate-700 animate-in slide-in-from-top-2 print:hidden">
           {notice}
         </div>
       )}
@@ -364,7 +779,7 @@ export default function AdminPage() {
                 DonDomi Control Central
               </h2>
               <p className="text-xs text-slate-500">
-                Ingresa el PIN Maestro para gestionar categorías, afiliados y la red en Valledupar.
+                Ingresa el PIN Maestro para gestionar comercios, pedidos, finanzas y flota en Valledupar.
               </p>
             </div>
 
@@ -393,7 +808,7 @@ export default function AdminPage() {
 
               <button
                 type="submit"
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-slate-900/25 transition text-sm flex items-center justify-center gap-2"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-slate-900/25 transition text-sm flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Unlock className="w-4 h-4 text-orange-400" />
                 <span>Desbloquear Administración</span>
@@ -408,56 +823,154 @@ export default function AdminPage() {
       ) : (
         /* PANTALLA PRINCIPAL DESBLOQUEADA */
         <main className="max-w-6xl mx-auto px-4 py-4 space-y-5">
-          {/* 3 Metric Cards */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Restaurantes en Red
+          {/* Alertas Operativas en Tiempo Real */}
+          {(delayedPendingOrders.length > 0 ||
+            unassignedReadyOrders.length > 0 ||
+            incidentOrders.length > 0) && (
+            <div className="bg-red-950 text-white rounded-3xl p-4 border border-red-800 shadow-lg flex flex-wrap items-center justify-between gap-3 print:hidden">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-red-500/20 border border-red-400/30 flex items-center justify-center text-red-300 shrink-0">
+                  <AlertCircle className="w-5 h-5 animate-pulse" />
+                </div>
+                <div className="text-xs space-y-0.5">
+                  <span className="font-black text-red-200 uppercase tracking-wider block">
+                    Alertas Operativas Activas en Valledupar
+                  </span>
+                  <div className="flex flex-wrap gap-3 text-slate-200">
+                    {delayedPendingOrders.length > 0 && (
+                      <span>
+                        ⚠️ <strong>{delayedPendingOrders.length}</strong> pedido(s) sin confirmar (&gt;8 min)
+                      </span>
+                    )}
+                    {unassignedReadyOrders.length > 0 && (
+                      <span>
+                        🛵 <strong>{unassignedReadyOrders.length}</strong> pedido(s) empacado(s) esperando repartidor
+                      </span>
+                    )}
+                    {incidentOrders.length > 0 && (
+                      <span>
+                        🚨 <strong>{incidentOrders.length}</strong> incidencia(s) reportada(s) en ruta
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setActiveTab('PEDIDOS');
+                  setOrderStatusFilter('ACTIVOS');
+                }}
+                className="bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold px-3.5 py-2 rounded-xl transition cursor-pointer"
+              >
+                Intervenir en Torre de Control
+              </button>
+            </div>
+          )}
+
+          {/* Filtro Global de Periodo + KPIs Ejecutivos */}
+          <div className="space-y-3 print:hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+                Resumen Ejecutivo de Plataforma
               </span>
-              <span className="text-2xl font-black text-slate-900 mt-1 block">
-                {restaurants.length}
-              </span>
-              <span className="text-[10px] text-slate-400 block">Afiliados en Valledupar</span>
+              <div className="flex items-center gap-1 bg-white p-1 rounded-2xl border border-slate-200 text-[11px] font-bold">
+                {(
+                  [
+                    { id: 'TODAY', label: 'Hoy' },
+                    { id: 'YESTERDAY', label: 'Ayer' },
+                    { id: 'WEEK', label: '7 Días' },
+                    { id: 'MONTH', label: '30 Días' },
+                    { id: 'ALL', label: 'Histórico' },
+                  ] as { id: SettlementPeriod; label: string }[]
+                ).map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setPeriod(p.id)}
+                    className={`px-2.5 py-1 rounded-xl transition cursor-pointer ${
+                      period === p.id
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Pedidos Totales
-              </span>
-              <span className="text-2xl font-black text-orange-600 mt-1 block">
-                {deliveredCount}
-              </span>
-              <span className="text-[10px] text-slate-400 block">Entregados con éxito</span>
-            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+              <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  GMV Entregado
+                </span>
+                <span className="text-lg font-black text-emerald-600 mt-1 block">
+                  {formatCOP(totalGMV)}
+                </span>
+                <span className="text-[10px] text-slate-400 block">
+                  Domicilios: {formatCOP(totalDeliveryFees)}
+                </span>
+              </div>
 
-            <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Flota de Repartidores
-              </span>
-              <span className="text-2xl font-black text-blue-600 mt-1 block">
-                {drivers.length}
-              </span>
-              <span className="text-[10px] text-slate-400 block">Domiciliarios registrados</span>
+              <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Pedidos Periodo
+                </span>
+                <span className="text-lg font-black text-slate-900 mt-1 block">
+                  {deliveredInPeriod.length} / {periodOrders.length}
+                </span>
+                <span className="text-[10px] text-amber-600 font-bold block">
+                  {activeOrders.length} activos ahora
+                </span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Comisiones DonDomi
+                </span>
+                <span className="text-lg font-black text-orange-600 mt-1 block">
+                  {formatCOP(totalPlatformCommission)}
+                </span>
+                <span className="text-[10px] text-slate-400 block">Sobre comida entregada</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Restaurantes
+                </span>
+                <span className="text-lg font-black text-slate-900 mt-1 block">
+                  {restaurants.filter((r) => (r.accountStatus || 'ACTIVE') === 'ACTIVE' && r.isOpen).length} /{' '}
+                  {restaurants.filter((r) => (r.accountStatus || 'ACTIVE') !== 'ARCHIVED').length}
+                </span>
+                <span className="text-[10px] text-emerald-600 font-bold block">Abiertos hoy</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Flota en Turno
+                </span>
+                <span className="text-lg font-black text-blue-600 mt-1 block">
+                  {drivers.filter((d) => d.isActive && d.isAvailable !== false).length} / {drivers.length}
+                </span>
+                <span className="text-[10px] text-slate-400 block">Domiciliarios disponibles</span>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Clientes Únicos
+                </span>
+                <span className="text-lg font-black text-indigo-600 mt-1 block">
+                  {customersDirectory.length}
+                </span>
+                <span className="text-[10px] text-slate-400 block">En directorio Valledupar</span>
+              </div>
             </div>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-5 gap-1 text-xs font-bold">
-            <button
-              onClick={() => setActiveTab('CATEGORIAS')}
-              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
-                activeTab === 'CATEGORIAS'
-                  ? 'bg-orange-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Layers className="w-4 h-4" />
-              <span>Categorías ({categories.length})</span>
-            </button>
-
+          {/* 6-Tab Navigation */}
+          <div className="bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-3 sm:grid-cols-6 gap-1 text-xs font-bold print:hidden">
             <button
               onClick={() => setActiveTab('RESTAURANTES')}
-              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
                 activeTab === 'RESTAURANTES'
                   ? 'bg-orange-600 text-white shadow-sm'
                   : 'text-slate-600 hover:bg-slate-50'
@@ -468,328 +981,413 @@ export default function AdminPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab('DOMICILIARIOS')}
-              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
-                activeTab === 'DOMICILIARIOS'
-                  ? 'bg-orange-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Bike className="w-4 h-4" />
-              <span>Domiciliarios ({drivers.length})</span>
-            </button>
-
-            <button
               onClick={() => setActiveTab('PEDIDOS')}
-              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
                 activeTab === 'PEDIDOS'
                   ? 'bg-orange-600 text-white shadow-sm'
                   : 'text-slate-600 hover:bg-slate-50'
               }`}
             >
               <ShoppingBag className="w-4 h-4" />
-              <span>Torre de Pedidos</span>
+              <span>Torre Pedidos ({activeOrders.length})</span>
             </button>
 
             <button
-              onClick={() => setActiveTab('AJUSTES')}
-              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 ${
-                activeTab === 'AJUSTES'
+              onClick={() => setActiveTab('FINANZAS')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'FINANZAS'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              <span>Liquidaciones</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('DOMICILIARIOS')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'DOMICILIARIOS'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Bike className="w-4 h-4" />
+              <span>Flota ({drivers.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('CLIENTES')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'CLIENTES'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Clientes ({customersDirectory.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('CATEGORIAS')}
+              className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'CATEGORIAS'
                   ? 'bg-orange-600 text-white shadow-sm'
                   : 'text-slate-600 hover:bg-slate-50'
               }`}
             >
               <Sliders className="w-4 h-4" />
-              <span>Ajustes & Tarifa</span>
+              <span>Catálogo & Ajustes</span>
             </button>
           </div>
 
           {/* ============================================================== */}
-          {/* TAB 1: GESTIÓN DE CATEGORÍAS ("¿Qué se te antoja hoy?") */}
-          {/* ============================================================== */}
-          {activeTab === 'CATEGORIAS' && (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900">
-                    Categorías de Comida en Valledupar
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Aparecen en el carrusel de la página principal bajo &quot;¿Qué se te antoja hoy?&quot;.
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleOpenAddCategory}
-                  className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-orange-600/20"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Crear Categoría</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {categories.map((cat) => (
-                  <div
-                    key={cat.id}
-                    className="bg-white rounded-3xl p-4 border border-slate-200 shadow-xs flex flex-col justify-between gap-3 group hover:border-orange-300 transition"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="w-12 h-12 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center text-2xl shadow-inner">
-                        {cat.icon}
-                      </div>
-                      {cat.badge && (
-                        <span className="text-[10px] font-black uppercase tracking-wider text-orange-600 bg-orange-100/70 px-2 py-0.5 rounded-full">
-                          {cat.badge}
-                        </span>
-                      )}
-                    </div>
-
-                    <div>
-                      <h4 className="font-black text-sm text-slate-900">{cat.name}</h4>
-                      <p className="text-[11px] text-slate-400 font-mono">slug: {cat.slug}</p>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-1 pt-2 border-t border-slate-100">
-                      <button
-                        onClick={() => handleOpenEditCategory(cat)}
-                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
-                        title="Editar categoría"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteCategory(cat.id, cat.name)}
-                        className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition"
-                        title="Eliminar categoría"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ============================================================== */}
-          {/* TAB 2: DIRECTORIO Y AFILIACIÓN DE RESTAURANTES */}
+          {/* TAB 1: GESTIÓN COMPLETA DE RESTAURANTES */}
           {/* ============================================================== */}
           {activeTab === 'RESTAURANTES' && (
             <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
                 <div>
                   <h3 className="font-extrabold text-base text-slate-900">
-                    Restaurantes Afiliados ({restaurants.length})
+                    Gestión Completa de Restaurantes Afiliados
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Cada restaurante administra de forma autónoma su propio menú desde su panel.
+                    Crea, edita tarifas/comisiones, inspecciona menús, pausa cocinas o suspende/archiva comercios.
                   </p>
                 </div>
 
                 <button
-                  onClick={() => setIsAddRestModalOpen(true)}
-                  className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-orange-600/20"
+                  onClick={handleOpenCreateRest}
+                  className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-orange-600/20 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Afiliar Restaurante</span>
+                  <span>Afiliar Nuevo Restaurante</span>
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {restaurants.map((rest) => (
-                  <div
-                    key={rest.id}
-                    className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col justify-between gap-3"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+              {/* Barra de Filtros y Búsqueda */}
+              <div className="bg-white p-3 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                  {(
+                    [
+                      { id: 'TODOS', label: 'Activos en Red' },
+                      { id: 'ABIERTOS', label: 'Cocina Abierta' },
+                      { id: 'PAUSADOS', label: 'Cocina Cerrada' },
+                      { id: 'SUSPENDIDOS', label: 'Suspendidos' },
+                      { id: 'ARCHIVADOS', label: 'Archivados' },
+                    ] as { id: RestStatusFilter; label: string }[]
+                  ).map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setRestFilter(f.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                        restFilter === f.id
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={restSearch}
+                    onChange={(e) => setRestSearch(e.target.value)}
+                    placeholder="Buscar por nombre, barrio o tel..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+
+              {filteredRestaurants.length === 0 ? (
+                <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center text-xs text-slate-400">
+                  No se encontraron restaurantes bajo el filtro seleccionado ({restFilter}).
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {filteredRestaurants.map((rest) => {
+                    const accStatus = rest.accountStatus || 'ACTIVE';
+                    const restProducts = productsByRestaurant[rest.id] || [];
+                    const restOrdersCount = orders.filter(
+                      (o) => o.restaurantId === rest.id || o.restaurantName === rest.name
+                    ).length;
+
+                    return (
+                      <div
+                        key={rest.id}
+                        className={`bg-white rounded-3xl p-4 sm:p-5 border shadow-xs flex flex-col justify-between gap-3 ${
+                          accStatus === 'SUSPENDED'
+                            ? 'border-amber-300 bg-amber-50/10'
+                            : accStatus === 'ARCHIVED'
+                            ? 'border-slate-300 opacity-70'
+                            : 'border-slate-200'
+                        }`}
+                      >
                         <div>
-                          <h4 className="font-black text-base text-slate-900">{rest.name}</h4>
-                          <p className="text-xs text-slate-500">{rest.neighborhood} · Valledupar</p>
+                          <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-black text-base text-slate-900">{rest.name}</h4>
+                                {accStatus !== 'ACTIVE' && (
+                                  <span
+                                    className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                      accStatus === 'SUSPENDED'
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : 'bg-slate-200 text-slate-700'
+                                    }`}
+                                  >
+                                    {accStatus === 'SUSPENDED' ? 'Suspendido' : 'Archivado'}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-500">
+                                {rest.neighborhood} · {rest.address}
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={() => toggleRestaurantStatus(rest.id)}
+                              className={`px-3 py-1 rounded-full text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                                rest.isOpen
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                              title="Abrir o pausar recepción de pedidos"
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  rest.isOpen ? 'bg-emerald-600' : 'bg-red-600'
+                                }`}
+                              ></span>
+                              <span>{rest.isOpen ? 'Cocina Abierta' : 'Cocina Cerrada'}</span>
+                            </button>
+                          </div>
+
+                          <div className="pt-2.5 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                            <p>
+                              <strong>WhatsApp:</strong> {rest.phone}
+                            </p>
+                            <p>
+                              <strong>Comisión:</strong> {rest.commissionRate}%
+                            </p>
+                            <p>
+                              <strong>Pedido mín.:</strong> {formatCOP(rest.minOrderAmount || 0)}
+                            </p>
+                            <p>
+                              <strong>Carta / Pedidos:</strong> {restProducts.length} platos ·{' '}
+                              {restOrdersCount} órdenes
+                            </p>
+                            <p className="col-span-2 truncate">
+                              <strong>Acceso:</strong> {rest.email || `${rest.slug}@dondomi.com`} (PIN:{' '}
+                              <span className="font-mono font-bold">{rest.pin || '1234'}</span>)
+                            </p>
+                            {(rest.nequiNumber || rest.brebKey || rest.daviplataNumber) && (
+                              <p className="col-span-2 text-[11px] text-blue-700 bg-blue-50 px-2.5 py-1 rounded-xl">
+                                📲 Cuentas:{' '}
+                                {rest.nequiNumber ? `Nequi ${rest.nequiNumber} ` : ''}
+                                {rest.brebKey ? `· Bre-B ${rest.brebKey} ` : ''}
+                                {rest.daviplataNumber ? `· Davi ${rest.daviplataNumber}` : ''}
+                              </p>
+                            )}
+                          </div>
                         </div>
 
-                        <button
-                          onClick={() => toggleRestaurantStatus(rest.id)}
-                          className={`px-3 py-1 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
-                            rest.isOpen
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              rest.isOpen ? 'bg-emerald-600' : 'bg-red-600'
-                            }`}
-                          ></span>
-                          <span>{rest.isOpen ? 'Activo' : 'Pausado'}</span>
-                        </button>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-100 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleOpenEditRest(rest)}
+                              className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold flex items-center gap-1 transition cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              <span>Editar</span>
+                            </button>
+
+                            <button
+                              onClick={() => setInspectingRest(rest)}
+                              className="px-2.5 py-1.5 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold flex items-center gap-1 transition cursor-pointer"
+                            >
+                              <UtensilsCrossed className="w-3.5 h-3.5" />
+                              <span>Carta & Historial</span>
+                            </button>
+
+                            <Link
+                              href={`/restaurant/${rest.id}`}
+                              target="_blank"
+                              className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition"
+                              title="Ver tienda pública"
+                            >
+                              <ArrowUpRight className="w-3.5 h-3.5" />
+                            </Link>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            {accStatus !== 'ACTIVE' && (
+                              <button
+                                onClick={() => handleQuickRestAccountStatus(rest, 'ACTIVE')}
+                                className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-[11px] hover:bg-emerald-100 cursor-pointer"
+                              >
+                                Reactivar
+                              </button>
+                            )}
+                            {accStatus === 'ACTIVE' && (
+                              <button
+                                onClick={() => handleQuickRestAccountStatus(rest, 'SUSPENDED')}
+                                className="px-2 py-1 rounded-lg bg-amber-50 text-amber-800 font-bold text-[11px] hover:bg-amber-100 cursor-pointer"
+                                title="Ocultar temporalmente del catálogo público"
+                              >
+                                Suspender
+                              </button>
+                            )}
+                            {accStatus !== 'ARCHIVED' && (
+                              <button
+                                onClick={() => handleQuickRestAccountStatus(rest, 'ARCHIVED')}
+                                className="px-2 py-1 rounded-lg bg-slate-100 text-slate-600 font-bold text-[11px] hover:bg-slate-200 cursor-pointer"
+                                title="Archivar comercio"
+                              >
+                                Archivar
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
-
-                      <div className="pt-2 space-y-1 text-xs text-slate-600">
-                        <p><strong>Teléfono:</strong> {rest.phone}</p>
-                        <p><strong>Correo acceso:</strong> {rest.email || `${rest.slug}@dondomi.com`}</p>
-                        <p><strong>Comisión DonDomi:</strong> {rest.commissionRate}% pactada</p>
-                        <p><strong>Horario:</strong> {rest.openingHours}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                      <Link
-                        href={`/restaurant/${rest.id}`}
-                        target="_blank"
-                        className="text-orange-600 font-bold hover:underline flex items-center gap-1"
-                      >
-                        <span>Ver menú público</span>
-                        <ArrowUpRight className="w-3.5 h-3.5" />
-                      </Link>
-
-                      <span className="text-[11px] text-slate-400">PIN Cocina: {rest.pin || '1234'}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ============================================================== */}
-          {/* TAB 3: FLOTA DE DOMICILIARIOS */}
-          {/* ============================================================== */}
-          {activeTab === 'DOMICILIARIOS' && (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900">
-                    Flota de Domiciliarios ({drivers.length})
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Repartidores autorizados para tomar carreras con tarifa fija de $7.000 COP en Valledupar.
-                  </p>
+                    );
+                  })}
                 </div>
-
-                <button
-                  onClick={() => setIsAddDriverModalOpen(true)}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-blue-600/20"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Registrar Domiciliario</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {drivers.map((drv) => (
-                  <div
-                    key={drv.id}
-                    className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col justify-between gap-3"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center font-black">
-                            <Bike className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h4 className="font-black text-sm text-slate-900">{drv.name}</h4>
-                            <p className="text-xs text-slate-500">{drv.phone} · Placa: {drv.plate}</p>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => toggleDriverStatus(drv.id)}
-                          className={`px-3 py-1 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
-                            drv.isActive
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              drv.isActive ? 'bg-emerald-600' : 'bg-red-600'
-                            }`}
-                          ></span>
-                          <span>{drv.isActive ? 'Activo' : 'Inactivo'}</span>
-                        </button>
-                      </div>
-
-                      <div className="pt-2 text-xs text-slate-600 space-y-1">
-                        <p><strong>Correo acceso:</strong> {drv.email}</p>
-                        <p><strong>Carreras realizadas:</strong> {drv.totalDeliveries}</p>
-                        <p><strong>Calificación:</strong> ★ {drv.rating}</p>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                      <a
-                        href={`https://wa.me/57${drv.phone.replace(/\D/g, '')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-emerald-600 font-bold hover:underline"
-                      >
-                        Contactar WhatsApp
-                      </a>
-                      <span className="text-[11px] text-slate-400">Contraseña: domi1234</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
           )}
 
           {/* ============================================================== */}
-          {/* TAB 4: TORRE DE CONTROL DE PEDIDOS EN VIVO */}
+          {/* TAB 2: TORRE DE CONTROL DE PEDIDOS E INCIDENCIAS */}
           {/* ============================================================== */}
           {activeTab === 'PEDIDOS' && (
-            <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="font-extrabold text-base text-slate-900">
-                    Torre de Control de Pedidos ({orders.length})
+                    Torre de Control de Pedidos ({filteredOrders.length})
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Supervisa todas las órdenes en curso o cancela pedidos en caso de conflicto.
+                    Monitorea cada pedido en tiempo real, asigna o libera domiciliarios manualmente y verifica pagos.
                   </p>
                 </div>
               </div>
 
-              {orders.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">No hay pedidos registrados.</p>
+              {/* Filtros de Torre de Pedidos */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={orderSearch}
+                    onChange={(e) => setOrderSearch(e.target.value)}
+                    placeholder="Buscar #DD, cliente o teléfono..."
+                    className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                <select
+                  value={orderStatusFilter}
+                  onChange={(e) => setOrderStatusFilter(e.target.value)}
+                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700"
+                >
+                  <option value="TODOS">Todos los estados ({orders.length})</option>
+                  <option value="ACTIVOS">🔥 Solo Pedidos Activos ({activeOrders.length})</option>
+                  <option value="PENDING">Nuevos / Pendientes</option>
+                  <option value="PREPARING">En Cocina</option>
+                  <option value="READY_FOR_PICKUP">Listos para Recoger</option>
+                  <option value="ON_THE_WAY">En Camino</option>
+                  <option value="DELIVERED">Entregados</option>
+                  <option value="CANCELLED">Cancelados</option>
+                </select>
+
+                <select
+                  value={orderRestFilter}
+                  onChange={(e) => setOrderRestFilter(e.target.value)}
+                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700"
+                >
+                  <option value="TODOS">Todos los restaurantes</option>
+                  {restaurants.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {filteredOrders.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">
+                  No hay pedidos que coincidan con los filtros seleccionados.
+                </p>
               ) : (
                 <div className="divide-y divide-slate-100 text-xs">
-                  {orders.map((o) => (
-                    <div key={o.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
+                  {filteredOrders.map((o) => (
+                    <div
+                      key={o.id}
+                      className="py-3.5 flex flex-wrap items-center justify-between gap-3"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-black text-slate-900 text-sm">{o.orderNumber}</span>
                           <span className="text-slate-400">•</span>
-                          <span className="font-bold text-slate-700">{o.restaurantName}</span>
+                          <span className="font-bold text-slate-800">{o.restaurantName}</span>
+                          <span className="text-[11px] text-slate-400">
+                            {new Date(o.createdAt).toLocaleString('es-CO', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })}
+                          </span>
                         </div>
-                        <p className="text-slate-500 mt-0.5">
-                          Cliente: {o.customerName} ({o.customerPhone}) · {o.deliveryAddress.neighborhood}
+                        <p className="text-slate-600">
+                          Cliente: <strong>{o.customerName}</strong> ({o.customerPhone}) ·{' '}
+                          {o.deliveryAddress.street}, {o.deliveryAddress.neighborhood}
                         </p>
-                        {o.driverName && (
-                          <p className="text-blue-600 font-semibold text-[11px]">
-                            Repartidor asignado: {o.driverName}
-                          </p>
-                        )}
+                        <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                          <span className="text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-bold">
+                            Pago: {o.paymentMethod} ({o.paymentStatus === 'COMPLETED' ? 'Verificado' : 'Pendiente'})
+                          </span>
+                          {o.driverName ? (
+                            <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-bold">
+                              🛵 {o.driverName} ({o.deliveryFleet === 'PROPIO' ? 'Flota Propia' : 'DonDomi'})
+                            </span>
+                          ) : (
+                            o.status !== 'CANCELLED' &&
+                            o.status !== 'DELIVERED' && (
+                              <span className="text-[11px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-md font-bold">
+                                Sin repartidor asignado
+                              </span>
+                            )
+                          )}
+                          {o.rating && (
+                            <span className="text-[11px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-bold">
+                              ★ {o.rating} {o.reviewComment ? `- "${o.reviewComment}"` : ''}
+                            </span>
+                          )}
+                        </div>
                         {o.status === 'CANCELLED' && (
                           <p className="text-red-600 font-semibold text-[11px]">
-                            Cancelado por: {o.cancelledBy || 'SISTEMA'} {o.cancellationReason ? `(${o.cancellationReason})` : ''}
+                            Cancelado por: {o.cancelledBy || 'SISTEMA'}{' '}
+                            {o.cancellationReason ? `(${o.cancellationReason})` : ''}
                           </p>
                         )}
                         {o.incidentReason && (
                           <p className="text-amber-600 font-semibold text-[11px]">
-                            Incidencia repartidor: {o.incidentReason}
+                            🚨 Incidencia repartidor: {o.incidentReason}
                           </p>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
+                      <div className="flex items-center gap-2">
+                        <div className="text-right mr-1">
                           <span className="font-black text-slate-900 text-sm block">
                             {formatCOP(o.total)}
                           </span>
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-block ${
                               o.status === 'DELIVERED'
                                 ? 'bg-emerald-100 text-emerald-800'
                                 : o.status === 'CANCELLED'
@@ -800,6 +1398,16 @@ export default function AdminPage() {
                             {o.status}
                           </span>
                         </div>
+
+                        <button
+                          onClick={() => {
+                            setInspectingOrder(o);
+                            setSelectedDriverForOrder(o.driverId || '');
+                          }}
+                          className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer"
+                        >
+                          Gestionar
+                        </button>
 
                         {o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && (
                           <button
@@ -822,99 +1430,1068 @@ export default function AdminPage() {
           )}
 
           {/* ============================================================== */}
-          {/* TAB 5: AJUSTES Y TARIFA GLOBAL DE VALLEDUPAR */}
+          {/* TAB 3: LIQUIDACIONES, COMISIONES Y CORTES FINANCIEROS */}
           {/* ============================================================== */}
-          {activeTab === 'AJUSTES' && (
-            <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-6">
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900">
-                  Parámetros Globales de DonDomi
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Controla la tarifa fija de la ciudad y emite comunicados en tiempo real.
-                </p>
+          {activeTab === 'FINANZAS' && (
+            <div className="space-y-4">
+              <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Centro de Liquidaciones y Cortes Financieros
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Conciliación exacta por Restaurante y por Domiciliario según el flujo de efectivo y transferencias.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 print:hidden">
+                  <button
+                    onClick={handleExportCSV}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Exportar CSV</span>
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Imprimir Corte</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Tarifa fija de Domicilio */}
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
+              {/* Tabla 1: Liquidación por Restaurante */}
+              <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3 overflow-x-auto">
+                <h4 className="font-extrabold text-sm text-slate-900">
+                  1. Corte de Liquidación por Restaurante ({restaurantSettlements.length})
+                </h4>
+
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-[10px] font-black uppercase text-slate-400">
+                      <th className="py-2 pr-3">Restaurante</th>
+                      <th className="py-2 px-2">Entregados</th>
+                      <th className="py-2 px-2">Subtotal Comida</th>
+                      <th className="py-2 px-2">Comida Efectivo</th>
+                      <th className="py-2 px-2">Comida Digital</th>
+                      <th className="py-2 px-2">Flota DonDomi / Propia</th>
+                      <th className="py-2 px-2">Domis Digitales (a Repartidor)</th>
+                      <th className="py-2 px-2">Comisión DonDomi</th>
+                      <th className="py-2 pl-2 text-right">Saldo a Cobrar al Local</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {restaurantSettlements.map(({ restaurant: r, summary: s }) => (
+                      <tr key={r.id} className="hover:bg-slate-50">
+                        <td className="py-2.5 pr-3 font-bold text-slate-900">{r.name}</td>
+                        <td className="py-2.5 px-2">{s.deliveredOrdersCount}</td>
+                        <td className="py-2.5 px-2 font-bold">{formatCOP(s.foodSubtotalTotal)}</td>
+                        <td className="py-2.5 px-2 text-amber-700">{formatCOP(s.cashFoodSubtotal)}</td>
+                        <td className="py-2.5 px-2 text-blue-700">{formatCOP(s.digitalFoodSubtotal)}</td>
+                        <td className="py-2.5 px-2">
+                          {s.dondomiFleetCount} DD / {s.ownFleetCount} Prop.
+                        </td>
+                        <td className="py-2.5 px-2 font-semibold text-amber-800">
+                          {formatCOP(s.deliveryFeesOwedToDrivers)}
+                        </td>
+                        <td className="py-2.5 px-2 font-semibold text-orange-600">
+                          {formatCOP(s.platformCommissionAmount)} ({s.commissionRate}%)
+                        </td>
+                        <td className="py-2.5 pl-2 text-right font-black text-slate-900">
+                          {formatCOP(s.totalOwedByRestaurant)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Tabla 2: Liquidación por Domiciliario */}
+              <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3 overflow-x-auto">
+                <h4 className="font-extrabold text-sm text-slate-900">
+                  2. Corte de Liquidación por Domiciliario DonDomi ({driverSettlements.length})
+                </h4>
+
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-[10px] font-black uppercase text-slate-400">
+                      <th className="py-2 pr-3">Domiciliario</th>
+                      <th className="py-2 px-2">Carreras Entregadas</th>
+                      <th className="py-2 px-2">Ganancia Total ($7k/u)</th>
+                      <th className="py-2 px-2">Efectivo Total Cobrado</th>
+                      <th className="py-2 px-2">Efectivo Comida (Entregar a Local)</th>
+                      <th className="py-2 pl-2 text-right">Domis Digitales (Por Recibir)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {driverSettlements.map(({ driver: d, summary: s }) => (
+                      <tr key={d.id} className="hover:bg-slate-50">
+                        <td className="py-2.5 pr-3 font-bold text-slate-900">
+                          {d.name} <span className="text-slate-400 font-normal">({d.plate})</span>
+                        </td>
+                        <td className="py-2.5 px-2 font-bold">{s.completedDeliveries}</td>
+                        <td className="py-2.5 px-2 font-black text-emerald-600">
+                          {formatCOP(s.driverDeliveryEarnings)}
+                        </td>
+                        <td className="py-2.5 px-2">{formatCOP(s.totalCashCollectedFromCustomers)}</td>
+                        <td className="py-2.5 px-2 font-semibold text-amber-700">
+                          {formatCOP(s.cashFoodToHandOverToRestaurants)}
+                        </td>
+                        <td className="py-2.5 pl-2 text-right font-black text-blue-600">
+                          {formatCOP(s.digitalDeliveryFeesOwedToDriver)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 4: FLOTA DE DOMICILIARIOS Y ESTADOS OPERATIVOS */}
+          {/* ============================================================== */}
+          {activeTab === 'DOMICILIARIOS' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Flota de Domiciliarios ({drivers.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Administra repartidores, datos de vehículo, disponibilidad de turno y carreras en curso.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleOpenAddDriver}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-blue-600/20 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Registrar Domiciliario</span>
+                </button>
+              </div>
+
+              <div className="bg-white p-3 rounded-2xl border border-slate-200 flex items-center justify-between">
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={driverSearch}
+                    onChange={(e) => setDriverSearch(e.target.value)}
+                    placeholder="Buscar domiciliario por nombre, celular o placa..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {filteredDrivers.map((drv) => {
+                  const currentOrder = activeOrders.find(
+                    (o) => o.driverId === drv.id || o.driverName === drv.name
+                  );
+                  const isAvailable = drv.isAvailable !== false;
+
+                  return (
+                    <div
+                      key={drv.id}
+                      className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col justify-between gap-3"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center font-black">
+                              <Bike className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h4 className="font-black text-sm text-slate-900">{drv.name}</h4>
+                              <p className="text-xs text-slate-500">
+                                {drv.phone} · {drv.vehicleType || 'MOTO'}: {drv.plate}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => toggleDriverAvailability(drv.id)}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${
+                                isAvailable
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-slate-200 text-slate-700'
+                              }`}
+                              title="Cambiar estado de turno"
+                            >
+                              {isAvailable ? '🟢 En Turno' : '⏸️ Pausado'}
+                            </button>
+
+                            <button
+                              onClick={() => toggleDriverStatus(drv.id)}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${
+                                drv.isActive
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                              title="Habilitar o suspender cuenta"
+                            >
+                              {drv.isActive ? 'Habilitado' : 'Suspendido'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 text-xs text-slate-600 space-y-1">
+                          <p>
+                            <strong>Correo acceso:</strong> {drv.email} (Clave:{' '}
+                            <span className="font-mono font-bold">{drv.pin || 'domi1234'}</span>)
+                          </p>
+                          <p>
+                            <strong>Carreras históricas:</strong> {drv.totalDeliveries} ·{' '}
+                            <strong>Calificación:</strong> ★ {drv.rating}
+                          </p>
+                          {currentOrder ? (
+                            <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 font-bold text-[11px] mt-1">
+                              🛵 En carrera activa: {currentOrder.orderNumber} ({currentOrder.restaurantName})
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-emerald-700 font-semibold">
+                              ✓ Libre para tomar pedido
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleOpenEditDriver(drv)}
+                            className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>Editar</span>
+                          </button>
+                          <a
+                            href={`https://wa.me/57${drv.phone.replace(/\D/g, '')}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-emerald-600 font-bold hover:underline"
+                          >
+                            WhatsApp
+                          </a>
+                        </div>
+                        <a
+                          href={`tel:${drv.phone}`}
+                          className="text-blue-600 font-bold hover:underline"
+                        >
+                          Llamar
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 5: DIRECTORIO DE CLIENTES */}
+          {/* ============================================================== */}
+          {activeTab === 'CLIENTES' && (
+            <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Directorio Consolidado de Clientes ({customersDirectory.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Clientes identificados por su número celular de 10 dígitos en Valledupar.
+                  </p>
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={customerSearch}
+                    onChange={(e) => setCustomerSearch(e.target.value)}
+                    placeholder="Buscar cliente, celular o barrio..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+
+              {customersDirectory.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">
+                  Aún no hay clientes registrados en el historial de pedidos.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100 text-xs">
+                  {customersDirectory.map((c) => (
+                    <div
+                      key={c.phone}
+                      className="py-3 flex flex-wrap items-center justify-between gap-3"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-slate-900 text-sm">{c.name}</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="font-mono font-bold text-blue-600">{c.phone}</span>
+                        </div>
+                        <p className="text-slate-500 mt-0.5">
+                          📍 {c.street}, Barrio {c.neighborhood} · Último pedido:{' '}
+                          {new Date(c.lastOrderAt).toLocaleDateString('es-CO')}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <span className="font-black text-emerald-600 text-sm block">
+                            {formatCOP(c.totalSpent)}
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            {c.deliveredCount} entregados · {c.cancelledCount} cancelados
+                          </span>
+                        </div>
+
+                        <a
+                          href={`https://wa.me/57${c.phone}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-3 py-1.5 rounded-xl border border-emerald-200"
+                        >
+                          WhatsApp
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 6: CATEGORÍAS Y CONFIGURACIÓN GLOBAL DE VALLEDUPAR */}
+          {/* ============================================================== */}
+          {activeTab === 'CATEGORIAS' && (
+            <div className="space-y-5">
+              {/* Categorías de comida */}
+              <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h4 className="font-extrabold text-sm text-slate-900">
-                      Tarifa Plana de Domicilio en Valledupar
-                    </h4>
+                    <h3 className="font-extrabold text-base text-slate-900">
+                      Categorías del Catálogo (&quot;¿Qué se te antoja hoy?&quot;)
+                    </h3>
                     <p className="text-xs text-slate-500">
-                      Actualmente fijada para todos los pedidos de la plataforma.
+                      Aparecen en el carrusel superior de la tienda para filtrar platos y restaurantes.
                     </p>
                   </div>
-                  <span className="text-xl font-black text-orange-600">
-                    {formatCOP(globalDeliveryFee)}
-                  </span>
+
+                  <button
+                    onClick={handleOpenAddCategory}
+                    className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-orange-600/20 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Crear Categoría</span>
+                  </button>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    step={500}
-                    min={3000}
-                    value={globalDeliveryFee}
-                    onChange={(e) => setGlobalDeliveryFee(Number(e.target.value))}
-                    className="w-36 bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
-                  />
-                  <button
-                    onClick={() => showNotice(`✅ Tarifa plana actualizada a ${formatCOP(globalDeliveryFee)}`)}
-                    className="bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl"
-                  >
-                    Guardar Tarifa
-                  </button>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {categories.map((cat) => (
+                    <div
+                      key={cat.id}
+                      className="bg-slate-50 rounded-2xl p-3.5 border border-slate-200 flex flex-col justify-between gap-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl">
+                          {cat.icon}
+                        </div>
+                        {cat.badge && (
+                          <span className="text-[10px] font-black uppercase text-orange-600 bg-orange-100/80 px-2 py-0.5 rounded-full">
+                            {cat.badge}
+                          </span>
+                        )}
+                      </div>
+
+                      <div>
+                        <h4 className="font-black text-xs text-slate-900">{cat.name}</h4>
+                        <p className="text-[10px] text-slate-400 font-mono">slug: {cat.slug}</p>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-1 pt-2 border-t border-slate-200/70">
+                        <button
+                          onClick={() => handleOpenEditCategory(cat)}
+                          className="p-1.5 rounded-lg bg-white hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+                          title="Editar categoría"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setCategoryToDelete({ id: cat.id, name: cat.name })}
+                          className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition cursor-pointer"
+                          title="Eliminar categoría"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {/* Banner de Anuncio Global en la App */}
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Megaphone className="w-4 h-4 text-orange-600" />
-                  <h4 className="font-extrabold text-sm text-slate-900">
-                    Banner de Aviso Global (Visible para todos los clientes)
-                  </h4>
+              {/* Parámetros Globales */}
+              <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-5">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">
+                    Parámetros Globales de Operación en Valledupar
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Controla la tarifa plana de domicilio de la ciudad y emite avisos en vivo en el encabezado de la App.
+                  </p>
                 </div>
 
-                <textarea
-                  rows={2}
-                  value={globalAnnouncement || ''}
-                  onChange={(e) => setGlobalAnnouncement(e.target.value)}
-                  placeholder="Ej: Lluvias en Valledupar: los tiempos de entrega pueden presentar demoras de 10-15 minutos."
-                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                ></textarea>
+                {/* Tarifa fija de Domicilio */}
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-slate-900">
+                        Tarifa Plana de Domicilio Urbano (Valledupar)
+                      </h4>
+                      <p className="text-xs text-slate-500">
+                        100% para el repartidor que ejecuta la entrega ($0 tarifas ocultas al cliente).
+                      </p>
+                    </div>
+                    <span className="text-xl font-black text-orange-600">
+                      {formatCOP(globalDeliveryFee)}
+                    </span>
+                  </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      if (globalAnnouncement) {
-                        showNotice('📢 Aviso global publicado en la App');
-                      } else {
-                        showNotice('Aviso global retirado');
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step={500}
+                      min={3000}
+                      value={globalDeliveryFee}
+                      onChange={(e) => setGlobalDeliveryFee(Number(e.target.value))}
+                      className="w-36 bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                    />
+                    <button
+                      onClick={() =>
+                        showNotice(`✅ Tarifa plana actualizada a ${formatCOP(globalDeliveryFee)}`)
                       }
-                    }}
-                    className="bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs px-4 py-2 rounded-xl"
-                  >
-                    Guardar Comunicado
-                  </button>
-                  {globalAnnouncement && (
+                      className="bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl cursor-pointer"
+                    >
+                      Guardar Tarifa
+                    </button>
+                  </div>
+                </div>
+
+                {/* Banner de Anuncio Global en la App */}
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Megaphone className="w-4 h-4 text-orange-600" />
+                    <h4 className="font-extrabold text-sm text-slate-900">
+                      Banner de Comunicado Global (Visible para todos los clientes)
+                    </h4>
+                  </div>
+
+                  <textarea
+                    rows={2}
+                    value={globalAnnouncement || ''}
+                    onChange={(e) => setGlobalAnnouncement(e.target.value)}
+                    placeholder="Ej: Lluvias en Valledupar: los tiempos de entrega pueden presentar demoras de 10-15 minutos."
+                    className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  ></textarea>
+
+                  <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
-                        setGlobalAnnouncement(null);
-                        showNotice('Aviso global retirado');
+                        if (globalAnnouncement) {
+                          showNotice('📢 Aviso global publicado en la App');
+                        } else {
+                          showNotice('Aviso global retirado');
+                        }
                       }}
-                      className="bg-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-xl"
+                      className="bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs px-4 py-2 rounded-xl cursor-pointer"
                     >
-                      Quitar Aviso
+                      Publicar Comunicado
                     </button>
-                  )}
+                    {globalAnnouncement && (
+                      <button
+                        onClick={() => {
+                          setGlobalAnnouncement(null);
+                          showNotice('Aviso global retirado');
+                        }}
+                        className="bg-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-xl cursor-pointer"
+                      >
+                        Quitar Aviso
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           )}
         </main>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL CREAR / EDITAR RESTAURANTE COMPLETO */}
+      {/* ============================================================== */}
+      {isRestModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-xl w-full shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <h3 className="font-black text-base text-slate-900">
+                {editingRest ? `Editar Restaurante: ${editingRest.name}` : 'Afiliar Nuevo Restaurante'}
+              </h3>
+              <button
+                onClick={() => setIsRestModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRestaurant} className="space-y-3.5">
+              {restFormError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                  <span className="font-bold">{restFormError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nombre del Restaurante *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={restName}
+                    onChange={(e) => setRestName(e.target.value)}
+                    placeholder="Ej: Asados del Valle"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Barrio en Valledupar *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={restNeighborhood}
+                    onChange={(e) => setRestNeighborhood(e.target.value)}
+                    placeholder="Ej: Novalito, Los Cortijos, Centro"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Dirección Exacta (Recogida) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={restAddress}
+                    onChange={(e) => setRestAddress(e.target.value)}
+                    placeholder="Ej: Calle 9 # 6-30"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Celular / WhatsApp (10 dígitos) *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    maxLength={10}
+                    value={restPhone}
+                    onChange={(e) => setRestPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="3001234567"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Correo de Acceso al Panel
+                  </label>
+                  <input
+                    type="email"
+                    value={restEmail}
+                    onChange={(e) => setRestEmail(e.target.value)}
+                    placeholder="mirestaurante@dondomi.com"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    PIN de Acceso (Cocina)
+                  </label>
+                  <input
+                    type="text"
+                    value={restPin}
+                    onChange={(e) => setRestPin(e.target.value)}
+                    placeholder="1234"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Comisión (%)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={30}
+                    value={restCommission}
+                    onChange={(e) => setRestCommission(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Pedido Mín. ($)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1000}
+                    value={restMinOrder}
+                    onChange={(e) => setRestMinOrder(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Tiempo Mín (m)
+                  </label>
+                  <input
+                    type="number"
+                    min={10}
+                    value={restTimeMin}
+                    onChange={(e) => setRestTimeMin(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Tiempo Máx (m)
+                  </label>
+                  <input
+                    type="number"
+                    min={15}
+                    value={restTimeMax}
+                    onChange={(e) => setRestTimeMax(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Horario de Atención
+                  </label>
+                  <input
+                    type="text"
+                    value={restHours}
+                    onChange={(e) => setRestHours(e.target.value)}
+                    placeholder="11:00 AM - 10:00 PM"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Estado Administrativo
+                  </label>
+                  <select
+                    value={restAccountStatus}
+                    onChange={(e) =>
+                      setRestAccountStatus(
+                        e.target.value as 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED'
+                      )
+                    }
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                  >
+                    <option value="ACTIVE">🟢 Activo en Catálogo</option>
+                    <option value="SUSPENDED">⏸️ Suspendido Temporalmente</option>
+                    <option value="ARCHIVED">📦 Archivado</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Métodos de Pago y Cuentas del Restaurante */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                <span className="text-xs font-extrabold text-slate-800 block">
+                  Métodos de Pago y Cuentas del Negocio
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={restAcceptsCash}
+                      onChange={(e) => setRestAcceptsCash(e.target.checked)}
+                      className="accent-orange-600"
+                    />
+                    <span>Efectivo</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={restAcceptsNequi}
+                      onChange={(e) => setRestAcceptsNequi(e.target.checked)}
+                      className="accent-orange-600"
+                    />
+                    <span>Nequi</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={restAcceptsBreb}
+                      onChange={(e) => setRestAcceptsBreb(e.target.checked)}
+                      className="accent-orange-600"
+                    />
+                    <span>Llave Bre-B</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={restAcceptsDaviplata}
+                      onChange={(e) => setRestAcceptsDaviplata(e.target.checked)}
+                      className="accent-orange-600"
+                    />
+                    <span>Daviplata</span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    value={restNequiNumber}
+                    onChange={(e) => setRestNequiNumber(e.target.value)}
+                    placeholder="Cuenta Nequi"
+                    className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono"
+                  />
+                  <input
+                    type="text"
+                    value={restBrebKey}
+                    onChange={(e) => setRestBrebKey(e.target.value)}
+                    placeholder="Llave Bre-B"
+                    className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono"
+                  />
+                  <input
+                    type="text"
+                    value={restDaviplataNumber}
+                    onChange={(e) => setRestDaviplataNumber(e.target.value)}
+                    placeholder="Cuenta Daviplata"
+                    className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsRestModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md cursor-pointer"
+                >
+                  {editingRest ? 'Guardar Cambios' : 'Afiliar Restaurante'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL INSPECCIONAR CARTA E HISTORIAL DE UN RESTAURANTE */}
+      {/* ============================================================== */}
+      {inspectingRest && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-2xl w-full shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <div>
+                <h3 className="font-black text-base text-slate-900">
+                  Inspección de Comercio: {inspectingRest.name}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {inspectingRest.neighborhood} · Tel: {inspectingRest.phone}
+                </p>
+              </div>
+              <button
+                onClick={() => setInspectingRest(null)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Platos del restaurante */}
+            <div className="space-y-2">
+              <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-500">
+                Carta del Restaurante ({(productsByRestaurant[inspectingRest.id] || []).length} platos)
+              </h4>
+              {(productsByRestaurant[inspectingRest.id] || []).length === 0 ? (
+                <p className="text-xs text-slate-400 bg-slate-50 p-4 rounded-2xl text-center">
+                  Este comercio aún no ha cargado platos en su carta.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl px-3">
+                  {(productsByRestaurant[inspectingRest.id] || []).map((p) => (
+                    <div key={p.id} className="py-2.5 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="font-bold text-slate-900">{p.name}</span>
+                        <span className="text-slate-400 mx-1.5">•</span>
+                        <span className="text-orange-600 font-semibold">{p.categoryName}</span>
+                        <span className="block font-black text-slate-700">{formatCOP(p.price)}</span>
+                      </div>
+                      <button
+                        onClick={() => toggleProductAvailability(inspectingRest.id, p.id)}
+                        className={`px-2.5 py-1 rounded-xl font-bold text-[11px] cursor-pointer ${
+                          p.isAvailable
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}
+                      >
+                        {p.isAvailable ? 'Disponible' : 'Agotado'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Últimos pedidos del restaurante */}
+            <div className="space-y-2 pt-2">
+              <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-500">
+                Historial de Pedidos del Comercio
+              </h4>
+              <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl px-3 max-h-56 overflow-y-auto text-xs">
+                {orders
+                  .filter(
+                    (o) =>
+                      o.restaurantId === inspectingRest.id ||
+                      o.restaurantName === inspectingRest.name
+                  )
+                  .map((o) => (
+                    <div key={o.id} className="py-2 flex items-center justify-between">
+                      <div>
+                        <span className="font-black text-slate-900">{o.orderNumber}</span> ·{' '}
+                        <span>{o.customerName}</span>
+                        <span className="block text-[10px] text-slate-400">
+                          {new Date(o.createdAt).toLocaleString('es-CO')} · {o.paymentMethod}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-bold block">{formatCOP(o.total)}</span>
+                        <span className="text-[10px] font-bold text-slate-500">{o.status}</span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL INTERVENCIÓN Y ASIGNACIÓN DE PEDIDO (TORRE DE CONTROL) */}
+      {/* ============================================================== */}
+      {inspectingOrder && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-lg w-full shadow-2xl space-y-4 my-8 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div>
+                <h3 className="font-black text-base text-slate-900">
+                  Gestión de Orden {inspectingOrder.orderNumber}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {inspectingOrder.restaurantName} → {inspectingOrder.customerName} (
+                  {inspectingOrder.customerPhone})
+                </p>
+              </div>
+              <button
+                onClick={() => setInspectingOrder(null)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Detalle de Items */}
+            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs space-y-1">
+              <span className="font-bold text-slate-700 block">Detalle del Pedido:</span>
+              {inspectingOrder.items.map((it) => (
+                <div key={it.id} className="flex justify-between">
+                  <span>
+                    {it.quantity}x {it.productName}
+                  </span>
+                  <span className="font-bold">{formatCOP(it.subtotal)}</span>
+                </div>
+              ))}
+              <div className="pt-1.5 border-t border-slate-200 flex justify-between font-black text-slate-900">
+                <span>
+                  Total (Comida {formatCOP(inspectingOrder.subtotal)} + Domi{' '}
+                  {formatCOP(inspectingOrder.deliveryFee)}):
+                </span>
+                <span>{formatCOP(inspectingOrder.total)}</span>
+              </div>
+            </div>
+
+            {/* Verificación de Pago */}
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
+              <div>
+                <span className="font-bold block text-slate-800">
+                  Método de Pago: {inspectingOrder.paymentMethod}
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Estado: {inspectingOrder.paymentStatus === 'COMPLETED' ? '✓ Verificado' : '⏳ Pendiente'}
+                </span>
+              </div>
+              {inspectingOrder.paymentStatus !== 'COMPLETED' && (
+                <button
+                  onClick={async () => {
+                    await confirmOrderPayment(inspectingOrder.id);
+                    setInspectingOrder({ ...inspectingOrder, paymentStatus: 'COMPLETED' });
+                    showNotice(`✅ Pago de ${inspectingOrder.orderNumber} verificado`);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Marcar Pagado</span>
+                </button>
+              )}
+            </div>
+
+            {/* Asignar o Reasignar Domiciliario Manualmente */}
+            {inspectingOrder.status !== 'DELIVERED' &&
+              inspectingOrder.status !== 'CANCELLED' && (
+                <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-200 space-y-2.5 text-xs">
+                  <span className="font-extrabold text-blue-950 block">
+                    Asignación Manual de Repartidor DonDomi
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={selectedDriverForOrder}
+                      onChange={(e) => setSelectedDriverForOrder(e.target.value)}
+                      className="flex-1 bg-white border border-blue-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800"
+                    >
+                      <option value="">-- Seleccionar domiciliario --</option>
+                      {drivers
+                        .filter((d) => d.isActive)
+                        .map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name} ({d.plate}) {d.isAvailable === false ? '[Pausado]' : '[En Turno]'}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      disabled={!selectedDriverForOrder}
+                      onClick={async () => {
+                        const drv = drivers.find((d) => d.id === selectedDriverForOrder);
+                        if (!drv) return;
+                        await assignDriverByAdmin(inspectingOrder.id, drv);
+                        setInspectingOrder({
+                          ...inspectingOrder,
+                          driverId: drv.id,
+                          driverName: drv.name,
+                          deliveryFleet: 'DONDOMI',
+                        });
+                        showNotice(
+                          `🛵 Orden ${inspectingOrder.orderNumber} asignada a ${drv.name}`
+                        );
+                      }}
+                      className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white font-bold px-3.5 py-2 rounded-xl cursor-pointer"
+                    >
+                      Asignar
+                    </button>
+                  </div>
+
+                  {inspectingOrder.driverId && (
+                    <button
+                      onClick={async () => {
+                        await unclaimOrder(
+                          inspectingOrder.id,
+                          'Liberado manualmente por el Administrador para reasignación'
+                        );
+                        setInspectingOrder({
+                          ...inspectingOrder,
+                          driverId: undefined,
+                          driverName: undefined,
+                          status: 'READY_FOR_PICKUP',
+                        });
+                        showNotice(
+                          `🔄 Carrera ${inspectingOrder.orderNumber} liberada y devuelta al radar`
+                        );
+                      }}
+                      className="text-[11px] font-bold text-red-600 hover:underline cursor-pointer"
+                    >
+                      Liberar domiciliario actual ({inspectingOrder.driverName}) y devolver a disponibles
+                    </button>
+                  )}
+                </div>
+              )}
+
+            {/* Cambio de Estado Operativo */}
+            {inspectingOrder.status !== 'DELIVERED' &&
+              inspectingOrder.status !== 'CANCELLED' && (
+                <div className="space-y-2 text-xs">
+                  <span className="font-bold text-slate-700 block">
+                    Avanzar Estado Operativo:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      [
+                        { st: 'PREPARING', label: 'En Cocina' },
+                        { st: 'READY_FOR_PICKUP', label: 'Listo para Recoger' },
+                        { st: 'ON_THE_WAY', label: 'En Camino' },
+                        { st: 'DELIVERED', label: 'Entregado' },
+                      ] as { st: OrderStatus; label: string }[]
+                    ).map((btn) => (
+                      <button
+                        key={btn.st}
+                        onClick={async () => {
+                          await updateOrderStatus(inspectingOrder.id, btn.st);
+                          setInspectingOrder({ ...inspectingOrder, status: btn.st });
+                          showNotice(
+                            `Estado de ${inspectingOrder.orderNumber} cambiado a ${btn.st}`
+                          );
+                        }}
+                        className={`px-3 py-1.5 rounded-xl font-bold border transition cursor-pointer ${
+                          inspectingOrder.status === btn.st
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                        }`}
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+          </div>
+        </div>
       )}
 
       {/* ============================================================== */}
@@ -929,7 +2506,7 @@ export default function AdminPage() {
               </h3>
               <button
                 onClick={() => setIsCategoryModalOpen(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center"
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -937,7 +2514,9 @@ export default function AdminPage() {
 
             <form onSubmit={handleSaveCategory} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre de la Categoría</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nombre de la Categoría
+                </label>
                 <input
                   type="text"
                   required
@@ -961,7 +2540,9 @@ export default function AdminPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Insignia / Badge (Opcional)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Insignia / Badge (Opcional)
+                </label>
                 <input
                   type="text"
                   value={catBadge}
@@ -975,13 +2556,13 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={() => setIsCategoryModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md"
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md cursor-pointer"
                 >
                   Guardar Categoría
                 </button>
@@ -992,127 +2573,24 @@ export default function AdminPage() {
       )}
 
       {/* ============================================================== */}
-      {/* MODAL AFILIAR RESTAURANTE */}
+      {/* MODAL CREAR / EDITAR DOMICILIARIO */}
       {/* ============================================================== */}
-      {isAddRestModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="font-black text-base text-slate-900">Afiliar Nuevo Restaurante</h3>
-              <button
-                onClick={() => setIsAddRestModalOpen(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddRestaurant} className="space-y-3">
-              {restFormError && (
-                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
-                  <span className="font-bold">{restFormError}</span>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre del Restaurante</label>
-                <input
-                  type="text"
-                  required
-                  value={newRestName}
-                  onChange={(e) => setNewRestName(e.target.value)}
-                  placeholder="Ej: Asados del Valle"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Barrio en Valledupar</label>
-                <input
-                  type="text"
-                  required
-                  value={newRestNeighborhood}
-                  onChange={(e) => setNewRestNeighborhood(e.target.value)}
-                  placeholder="Ej: Novalito, Los Cortijos, Centro"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Dirección Exacta</label>
-                <input
-                  type="text"
-                  required
-                  value={newRestAddress}
-                  onChange={(e) => setNewRestAddress(e.target.value)}
-                  placeholder="Ej: Calle 9 # 6-30"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Celular / WhatsApp</label>
-                <input
-                  type="text"
-                  required
-                  value={newRestPhone}
-                  onChange={(e) => setNewRestPhone(e.target.value)}
-                  placeholder="300 123 4567"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Comisión Pactada (%)</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={25}
-                  value={newRestCommission}
-                  onChange={(e) => setNewRestCommission(Number(e.target.value))}
-                  placeholder="0 (gratis primeros meses) o 10%"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddRestModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md"
-                >
-                  Afiliar Restaurante
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL REGISTRAR DOMICILIARIO */}
-      {/* ============================================================== */}
-      {isAddDriverModalOpen && (
+      {isDriverModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 animate-in zoom-in-95">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="font-black text-base text-slate-900">Registrar Domiciliario</h3>
+              <h3 className="font-black text-base text-slate-900">
+                {editingDriver ? 'Editar Domiciliario' : 'Registrar Domiciliario'}
+              </h3>
               <button
-                onClick={() => setIsAddDriverModalOpen(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center"
+                onClick={() => setIsDriverModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleAddDriver} className="space-y-3">
+            <form onSubmit={handleSaveDriver} className="space-y-3">
               {driverFormError && (
                 <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
@@ -1121,44 +2599,92 @@ export default function AdminPage() {
               )}
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre Completo</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nombre Completo *
+                </label>
                 <input
                   type="text"
                   required
-                  value={newDriverName}
-                  onChange={(e) => setNewDriverName(e.target.value)}
+                  value={drvName}
+                  onChange={(e) => setDrvName(e.target.value)}
                   placeholder="Ej: Andrés Pardo"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Celular</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Celular / WhatsApp (10 dígitos) *
+                </label>
                 <input
-                  type="text"
+                  type="tel"
                   required
-                  value={newDriverPhone}
-                  onChange={(e) => setNewDriverPhone(e.target.value)}
-                  placeholder="300 987 6543"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  maxLength={10}
+                  value={drvPhone}
+                  onChange={(e) => setDrvPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="3009876543"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Vehículo</label>
+                  <select
+                    value={drvVehicle}
+                    onChange={(e) =>
+                      setDrvVehicle(e.target.value as 'MOTO' | 'BICICLETA' | 'AUTO')
+                    }
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-900"
+                  >
+                    <option value="MOTO">Moto</option>
+                    <option value="BICICLETA">Bicicleta</option>
+                    <option value="AUTO">Auto</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Placa</label>
+                  <input
+                    type="text"
+                    value={drvPlate}
+                    onChange={(e) => setDrvPlate(e.target.value)}
+                    placeholder="Ej: ABC-45D"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Correo de Acceso
+                </label>
+                <input
+                  type="email"
+                  value={drvEmail}
+                  onChange={(e) => setDrvEmail(e.target.value)}
+                  placeholder="repartidor@dondomi.com"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Placa de la Moto</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Contraseña / PIN
+                </label>
                 <input
                   type="text"
-                  value={newDriverPlate}
-                  onChange={(e) => setNewDriverPlate(e.target.value)}
-                  placeholder="Ej: ABC-45D"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  value={drvPin}
+                  onChange={(e) => setDrvPin(e.target.value)}
+                  placeholder="domi1234"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900"
                 />
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddDriverModalOpen(false)}
+                  onClick={() => setIsDriverModalOpen(false)}
                   className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
                 >
                   Cancelar
@@ -1167,7 +2693,7 @@ export default function AdminPage() {
                   type="submit"
                   className="px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md cursor-pointer"
                 >
-                  Registrar
+                  {editingDriver ? 'Guardar Cambios' : 'Registrar'}
                 </button>
               </div>
             </form>
@@ -1187,7 +2713,8 @@ export default function AdminPage() {
             <div className="text-center">
               <h4 className="font-black text-slate-900 text-base">¿Eliminar categoría?</h4>
               <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                ¿Deseas retirar permanentemente la categoría <strong>&quot;{categoryToDelete.name}&quot;</strong> de la pantalla principal de DonDomi?
+                ¿Deseas retirar permanentemente la categoría{' '}
+                <strong>&quot;{categoryToDelete.name}&quot;</strong> de la pantalla principal de DonDomi?
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 pt-2">

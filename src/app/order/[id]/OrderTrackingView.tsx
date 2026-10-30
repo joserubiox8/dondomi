@@ -16,8 +16,13 @@ import {
   Home,
   Loader2,
   X,
+  Star,
+  RotateCcw,
+  Copy,
+  Check,
 } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { useRouter } from 'next/navigation';
+import { useApp, parseOrderNotes } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types';
 import { supabase } from '@/lib/supabase';
@@ -27,7 +32,8 @@ interface OrderTrackingViewProps {
 }
 
 export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps) {
-  const { orders, restaurants, cancelOrderByCustomer, updateOrderStatus } = useApp();
+  const router = useRouter();
+  const { orders, restaurants, cancelOrderByCustomer, updateOrderStatus, rateOrder, reorderItems } = useApp();
   const [supabaseOrder, setSupabaseOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState<boolean>(false);
@@ -35,6 +41,12 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
   const [customCancelReason, setCustomCancelReason] = useState<string>('');
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Calificación post-entrega
+  const [selectedStars, setSelectedStars] = useState<number>(5);
+  const [reviewText, setReviewText] = useState<string>('');
+  const [ratingSubmitted, setRatingSubmitted] = useState<boolean>(false);
+  const [copiedTransfer, setCopiedTransfer] = useState<boolean>(false);
 
   // Buscar pedido en AppContext por ID o por orderNumber (ej: "DD-1042")
   const contextOrder = orders.find(
@@ -62,24 +74,7 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
           .maybeSingle();
 
         if (!error && data) {
-          let cancellationReason: string | undefined;
-          let cancelledBy: 'CLIENTE' | 'RESTAURANTE' | 'SISTEMA' | 'ADMINISTRADOR' | undefined;
-          let incidentReason: string | undefined;
-          let cleanNotes = data.customer_notes;
-
-          if (cleanNotes) {
-            const cancelMatch = cleanNotes.match(/\[Cancelado por (CLIENTE|RESTAURANTE|SISTEMA|ADMINISTRADOR): (.*?)\]/);
-            if (cancelMatch) {
-              cancelledBy = cancelMatch[1] as any;
-              cancellationReason = cancelMatch[2];
-              cleanNotes = cleanNotes.replace(cancelMatch[0], '').trim();
-            }
-            const incidentMatch = cleanNotes.match(/\[Incidencia Repartidor: (.*?)\]/);
-            if (incidentMatch) {
-              incidentReason = incidentMatch[1];
-              cleanNotes = cleanNotes.replace(incidentMatch[0], '').trim();
-            }
-          }
+          const parsed = parseOrderNotes(data.customer_notes);
 
           setSupabaseOrder({
             id: data.id,
@@ -100,10 +95,13 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
             paymentMethod: data.payment_method,
             paymentStatus: data.payment_status,
             deliveryAddress: data.delivery_address,
-            customerNotes: cleanNotes,
-            cancellationReason,
-            cancelledBy,
-            incidentReason,
+            customerNotes: data.customer_notes,
+            cancellationReason: parsed.cancellationReason,
+            cancelledBy: parsed.cancelledBy,
+            incidentReason: parsed.incidentReason,
+            deliveryFleet: parsed.deliveryFleet,
+            rating: parsed.rating,
+            reviewComment: parsed.reviewComment,
             estimatedDeliveryTime: data.estimated_delivery_time,
             createdAt: data.created_at,
           });
@@ -516,7 +514,137 @@ export default function OrderTrackingView({ orderParam }: OrderTrackingViewProps
               <span className="text-base text-orange-600">{formatCOP(order.total)}</span>
             </div>
           </div>
+
+          {/* Información de cuenta para transferencia directa al restaurante si aplica */}
+          {order.paymentMethod !== 'EFECTIVO' && order.paymentMethod !== 'CASH' && (
+            <div className="mt-3 bg-blue-50 border border-blue-200 rounded-2xl p-3 space-y-1.5 text-blue-950">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-blue-700">
+                  Cuenta {order.paymentMethod} de {order.restaurantName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const acc =
+                      order.paymentMethod === 'NEQUI'
+                        ? restaurant?.nequiNumber || cleanPhone
+                        : order.paymentMethod === 'DAVIPLATA'
+                        ? restaurant?.daviplataNumber || cleanPhone
+                        : restaurant?.brebKey || cleanPhone;
+                    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                      navigator.clipboard.writeText(acc).catch(() => {});
+                    }
+                    setCopiedTransfer(true);
+                    setTimeout(() => setCopiedTransfer(false), 2500);
+                  }}
+                  className="bg-white hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedTransfer ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedTransfer ? 'Copiado' : 'Copiar'}</span>
+                </button>
+              </div>
+              <p className="font-mono font-black text-sm text-slate-900">
+                {order.paymentMethod === 'NEQUI'
+                  ? restaurant?.nequiNumber || cleanPhone
+                  : order.paymentMethod === 'DAVIPLATA'
+                  ? restaurant?.daviplataNumber || cleanPhone
+                  : restaurant?.brebKey || cleanPhone}
+              </p>
+              <p className="text-[11px] text-blue-800">
+                Estado del pago:{' '}
+                <strong>
+                  {order.paymentStatus === 'COMPLETED' ? '✅ Verificado por el restaurante' : '⏳ Pendiente de verificación (envía el comprobante por WhatsApp)'}
+                </strong>
+              </p>
+            </div>
+          )}
+
+          {/* Botón Volver a pedir (cuando fue entregado o cancelado) */}
+          {(order.status === 'DELIVERED' || order.status === 'CANCELLED') && (
+            <div className="pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  reorderItems(order);
+                  router.push(`/restaurant/${order.restaurantId || 'rest-1'}`);
+                }}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 px-4 rounded-2xl text-xs transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4 text-orange-400" />
+                <span>Volver a pedir estos mismos platos</span>
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Calificación del Servicio (cuando está DELIVERED) */}
+        {order.status === 'DELIVERED' && (
+          <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-3 text-xs">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-sm text-slate-900">
+                {order.rating || ratingSubmitted ? '¡Gracias por tu calificación!' : 'Califica tu experiencia'}
+              </h3>
+              <span className="text-amber-500 font-black text-sm">
+                {'★'.repeat(order.rating || selectedStars)}
+              </span>
+            </div>
+
+            {order.rating || ratingSubmitted ? (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-emerald-900 space-y-1">
+                <p className="font-bold">
+                  Calificaste este pedido con {order.rating || selectedStars} de 5 estrellas.
+                </p>
+                {(order.reviewComment || reviewText) && (
+                  <p className="text-[11px] text-emerald-700 italic">
+                    &quot;{order.reviewComment || reviewText}&quot;
+                  </p>
+                )}
+              </div>
+            ) : (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await rateOrder(order.id, selectedStars, reviewText);
+                  setRatingSubmitted(true);
+                }}
+                className="space-y-3"
+              >
+                <p className="text-slate-500">
+                  ¿Cómo estuvo la comida de <strong>{order.restaurantName}</strong> y la entrega?
+                </p>
+                <div className="flex items-center justify-center gap-2 py-1">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      type="button"
+                      key={star}
+                      onClick={() => setSelectedStars(star)}
+                      className={`w-10 h-10 rounded-2xl border flex items-center justify-center transition cursor-pointer ${
+                        star <= selectedStars
+                          ? 'bg-amber-50 border-amber-400 text-amber-500 scale-105 shadow-2xs'
+                          : 'bg-slate-50 border-slate-200 text-slate-300'
+                      }`}
+                    >
+                      <Star className="w-5 h-5 fill-current" />
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={reviewText}
+                  onChange={(e) => setReviewText(e.target.value)}
+                  placeholder="Comentario opcional (ej: llegó calientico y rápido)..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-2.5 rounded-xl text-xs shadow-sm transition cursor-pointer"
+                >
+                  Enviar Calificación
+                </button>
+              </form>
+            )}
+          </div>
+        )}
 
         {/* Modal de Cancelación por parte del Cliente */}
         {isCancelModalOpen && (

@@ -31,6 +31,7 @@ import {
   dbToCategory,
   driverToDb,
   dbToDriver,
+  getLocalRestaurantsMeta,
 } from '@/lib/mappers';
 import { parseOrderNotes } from '@/context/AppContext';
 
@@ -220,20 +221,37 @@ export const dataService = {
   // 4. RESTAURANTES
   // ==========================================================================
   async getRestaurants(): Promise<{ data: Restaurant[]; error?: any }> {
+    const metaMap = getLocalRestaurantsMeta();
+    const applyMeta = (r: Restaurant): Restaurant => {
+      const m = metaMap[r.id] || {};
+      const cleanPhone = (r.phone || '3004567890').replace(/\D/g, '');
+      return {
+        ...r,
+        accountStatus: m.accountStatus || r.accountStatus || 'ACTIVE',
+        email: m.email || r.email || `${r.slug}@dondomi.com`,
+        pin: m.pin || r.pin || '1234',
+        nequiNumber: m.nequiNumber || r.nequiNumber || cleanPhone,
+        daviplataNumber: m.daviplataNumber || r.daviplataNumber || cleanPhone,
+        brebKey: m.brebKey || r.brebKey || `@${r.slug.replace(/[^a-z0-9]/gi, '')}`,
+        acceptsBreb: m.acceptsBreb ?? r.acceptsBreb ?? true,
+        acceptsCard: m.acceptsCard ?? r.acceptsCard ?? false,
+      };
+    };
+
     try {
       const { data, error } = await supabase.from('restaurants').select('*').order('name');
-      if (error) return { data: INITIAL_RESTAURANTS, error };
+      if (error) return { data: INITIAL_RESTAURANTS.map(applyMeta), error };
 
       if (data && data.length > 0) {
         const dbRests = data.map(dbToRestaurant);
         const restMap = new Map<string, Restaurant>();
-        INITIAL_RESTAURANTS.forEach((r) => restMap.set(r.id, r));
-        dbRests.forEach((r) => restMap.set(r.id, r));
+        INITIAL_RESTAURANTS.forEach((r) => restMap.set(r.id, applyMeta(r)));
+        dbRests.forEach((r) => restMap.set(r.id, applyMeta(r)));
         return { data: Array.from(restMap.values()) };
       }
-      return { data: INITIAL_RESTAURANTS };
+      return { data: INITIAL_RESTAURANTS.map(applyMeta) };
     } catch (err) {
-      return { data: INITIAL_RESTAURANTS, error: err };
+      return { data: INITIAL_RESTAURANTS.map(applyMeta), error: err };
     }
   },
 
@@ -321,6 +339,9 @@ export const dataService = {
           cancellationReason: parsed.cancellationReason,
           cancelledBy: parsed.cancelledBy,
           incidentReason: parsed.incidentReason,
+          deliveryFleet: parsed.deliveryFleet,
+          rating: parsed.rating,
+          reviewComment: parsed.reviewComment,
         };
       });
 

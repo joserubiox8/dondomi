@@ -97,6 +97,10 @@ export interface Restaurant {
   featured?: boolean;
   pin?: string; // PIN de 4 dígitos para acceso de contingencia
   email?: string; // Correo de acceso del restaurante
+  accountStatus?: 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
+  nequiNumber?: string;
+  daviplataNumber?: string;
+  brebKey?: string;
 }
 
 export type OrderStatus =
@@ -153,6 +157,9 @@ export interface Order {
   cancellationReason?: string;
   cancelledBy?: 'CLIENTE' | 'RESTAURANTE' | 'SISTEMA' | 'ADMINISTRADOR';
   incidentReason?: string;
+  deliveryFleet?: 'DONDOMI' | 'PROPIO';
+  rating?: number;
+  reviewComment?: string;
 }
 
 export interface Driver {
@@ -163,7 +170,7 @@ export interface Driver {
   email: string;
   plate: string;
   licensePlate?: string;
-  vehicleType?: 'MOTO' | 'BICICLETA';
+  vehicleType?: 'MOTO' | 'BICICLETA' | 'AUTO';
   isActive: boolean;
   isAvailable?: boolean;
   currentZone?: string;
@@ -171,6 +178,7 @@ export interface Driver {
   totalDeliveries: number;
   completedDeliveries?: number;
   activeOrderId?: string;
+  pin?: string;
   createdAt: string;
 }
 

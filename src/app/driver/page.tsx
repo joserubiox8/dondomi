@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Bike,
@@ -10,17 +10,21 @@ import {
   CheckCircle2,
   Clock,
   ArrowLeft,
-  DollarSign,
   AlertCircle,
   PackageCheck,
-  ChevronRight,
   LogOut,
   Store,
-  User,
   X,
+  MessageCircle,
+  Wallet,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
+import {
+  calculateDriverSettlement,
+  filterOrdersByPeriod,
+  isOwnFleetOrder,
+} from '@/lib/pricing';
 import { Order } from '@/types';
 
 export default function DriverPage() {
@@ -28,15 +32,18 @@ export default function DriverPage() {
     currentUser,
     orders,
     restaurants,
+    drivers,
     claimOrder,
+    confirmOrderPickup,
     unclaimOrder,
     updateOrderStatus,
+    toggleDriverAvailability,
     logout,
     loginAsDriver,
     globalDeliveryFee,
   } = useApp();
 
-  const [isAvailable, setIsAvailable] = useState<boolean>(true);
+  const [walletPeriod, setWalletPeriod] = useState<'TODAY' | 'ALL'>('TODAY');
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [isIncidentModalOpen, setIsIncidentModalOpen] = useState<boolean>(false);
@@ -45,33 +52,76 @@ export default function DriverPage() {
   const [isReleasing, setIsReleasing] = useState<boolean>(false);
 
   const defaultFee = globalDeliveryFee || 7000;
-  const driverId = currentUser?.role === 'DOMICILIARIO' ? currentUser.id : 'drv-demo';
-  const driverName = currentUser?.role === 'DOMICILIARIO' ? currentUser.name : 'Domiciliario DonDomi';
+  const driverId = currentUser?.role === 'DOMICILIARIO' ? currentUser.id : 'drv-1';
+  const driverName = currentUser?.role === 'DOMICILIARIO' ? currentUser.name : 'Javier Morales';
 
-  // Pedidos activos asignados a este repartidor
-  const activeOrder = orders.find(
-    (o) => (o.driverId === driverId || o.driverName === driverName) && o.status === 'ON_THE_WAY'
+  const driverRecord = useMemo(
+    () =>
+      drivers.find(
+        (d) =>
+          d.id === driverId ||
+          d.name.toLowerCase() === driverName.toLowerCase() ||
+          (currentUser?.email && d.email.toLowerCase() === currentUser.email.toLowerCase())
+      ),
+    [drivers, driverId, driverName, currentUser]
   );
 
-  // Pedidos disponibles para tomar carrera (en cocina o listos para recogida, sin repartidor asignado)
-  const availableOrders = orders.filter(
-    (o) =>
-      (o.status === 'READY_FOR_PICKUP' || o.status === 'PREPARING' || o.status === 'PENDING') &&
-      !o.driverId &&
-      (!activeOrder || activeOrder.id !== o.id)
+  const isAccountActive = driverRecord ? driverRecord.isActive !== false : true;
+  const isAvailable = driverRecord ? driverRecord.isAvailable !== false : true;
+
+  // Pedido activo asignado a este repartidor (en recogida PREPARING/READY_FOR_PICKUP o en ruta ON_THE_WAY)
+  const activeOrder = useMemo(
+    () =>
+      orders.find(
+        (o) =>
+          (o.driverId === driverId || o.driverName === driverName) &&
+          (o.status === 'ON_THE_WAY' || o.status === 'READY_FOR_PICKUP' || o.status === 'PREPARING')
+      ),
+    [orders, driverId, driverName]
   );
 
-  // Pedidos entregados por este repartidor hoy
-  const deliveredOrders = orders.filter(
-    (o) => (o.driverId === driverId || o.driverName === driverName) && o.status === 'DELIVERED'
+  // Pedidos disponibles en el radar: solo los que la cocina YA aceptó (PREPARING o READY_FOR_PICKUP),
+  // que no tengan domiciliario asignado y que no sean de flota propia del restaurante.
+  const availableOrders = useMemo(
+    () =>
+      orders.filter(
+        (o) =>
+          (o.status === 'READY_FOR_PICKUP' || o.status === 'PREPARING') &&
+          !o.driverId &&
+          !isOwnFleetOrder(o) &&
+          (!activeOrder || activeOrder.id !== o.id)
+      ),
+    [orders, activeOrder]
   );
 
-  const totalEarnings = deliveredOrders.reduce((acc, o) => acc + (o.deliveryFee || defaultFee), 0);
+  // Pedidos entregados por este repartidor
+  const allDriverDeliveredOrders = useMemo(
+    () =>
+      orders.filter(
+        (o) =>
+          (o.driverId === driverId || o.driverName === driverName) &&
+          o.status === 'DELIVERED' &&
+          !isOwnFleetOrder(o)
+      ),
+    [orders, driverId, driverName]
+  );
+
+  const filteredDeliveredOrders = useMemo(
+    () => filterOrdersByPeriod(allDriverDeliveredOrders, walletPeriod),
+    [allDriverDeliveredOrders, walletPeriod]
+  );
+
+  const settlement = useMemo(
+    () => calculateDriverSettlement(filteredDeliveredOrders, defaultFee),
+    [filteredDeliveredOrders, defaultFee]
+  );
 
   // Sonido de alerta para carreras
   const playChime = () => {
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
       const osc = ctx.createOscillator();
@@ -88,17 +138,45 @@ export default function DriverPage() {
     } catch {}
   };
 
+  const handleToggleTurn = () => {
+    if (driverRecord) {
+      toggleDriverAvailability(driverRecord.id);
+    }
+  };
+
   const handleClaim = async (order: Order) => {
-    playChime();
     setErrorNotice(null);
+    if (!isAccountActive) {
+      setErrorNotice('Tu cuenta de domiciliario se encuentra suspendida temporalmente por administración.');
+      return;
+    }
+    if (!isAvailable) {
+      setErrorNotice('Debes cambiar tu estado a "En Turno" en la parte superior para aceptar carreras.');
+      return;
+    }
+    if (activeOrder) {
+      setErrorNotice(`Ya tienes la carrera #${activeOrder.orderNumber} en curso. Entrégala antes de tomar otra.`);
+      return;
+    }
+
+    playChime();
     const result = await claimOrder(order.id, driverName, currentUser?.phone || '3001234567');
     if (result.success) {
-      setSuccessNotice(`¡Carrera #${order.orderNumber} aceptada! Dirígete al restaurante.`);
+      setSuccessNotice(
+        `¡Carrera #${order.orderNumber} asignada a ti! Dirígete a ${order.restaurantName} para recoger el paquete.`
+      );
       setTimeout(() => setSuccessNotice(null), 4000);
     } else {
       setErrorNotice(result.error || 'Esta carrera ya fue tomada por otro domiciliario.');
       setTimeout(() => setErrorNotice(null), 5000);
     }
+  };
+
+  const handleConfirmPickup = async (orderId: string, orderNumber: string) => {
+    playChime();
+    await confirmOrderPickup(orderId);
+    setSuccessNotice(`📦 Recogida de #${orderNumber} confirmada. ¡En camino hacia el cliente!`);
+    setTimeout(() => setSuccessNotice(null), 4000);
   };
 
   const handleConfirmRelease = async (e: React.FormEvent) => {
@@ -112,7 +190,9 @@ export default function DriverPage() {
     setIsReleasing(true);
     try {
       await unclaimOrder(activeOrder.id, finalReason);
-      setSuccessNotice(`Carrera #${activeOrder.orderNumber} liberada. El pedido volvió al radar para otros repartidores.`);
+      setSuccessNotice(
+        `Carrera #${activeOrder.orderNumber} liberada. El pedido volvió al radar para otros repartidores.`
+      );
       setIsIncidentModalOpen(false);
       setTimeout(() => setSuccessNotice(null), 5000);
     } catch (err: any) {
@@ -126,7 +206,7 @@ export default function DriverPage() {
   const handleDeliver = async (orderId: string) => {
     playChime();
     await updateOrderStatus(orderId, 'DELIVERED');
-    setSuccessNotice(`¡Excelente! Entrega confirmada y liquidada.`);
+    setSuccessNotice(`¡Excelente! Entrega confirmada y sumada a tu billetera.`);
     setTimeout(() => setSuccessNotice(null), 4000);
   };
 
@@ -134,11 +214,19 @@ export default function DriverPage() {
     await loginAsDriver('Javier Morales', '3001234567', '1234');
   };
 
-  // Buscar teléfono del restaurante
-  const getRestaurantPhone = (restId?: string, restName?: string) => {
+  // Buscar información completa del restaurante para el Punto A de recogida
+  const getRestaurantDetails = (restId?: string, restName?: string) => {
     const r = restaurants.find((item) => item.id === restId || item.name === restName);
-    return r?.phone || '3001234567';
+    return {
+      address: r?.address || 'Centro, Valledupar',
+      neighborhood: r?.neighborhood || 'Valledupar',
+      phone: (r?.phone || '3004567890').replace(/\D/g, ''),
+    };
   };
+
+  const activeRestDetails = activeOrder
+    ? getRestaurantDetails(activeOrder.restaurantId, activeOrder.restaurantName)
+    : null;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20">
@@ -160,7 +248,7 @@ export default function DriverPage() {
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                {driverName} {currentUser?.phone ? `· ${currentUser.phone}` : '· Moto'}
+                {driverName} {driverRecord?.plate ? `· ${driverRecord.plate}` : '· Moto'}
               </p>
             </div>
           </div>
@@ -168,17 +256,28 @@ export default function DriverPage() {
           {/* Acciones de cabecera */}
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setIsAvailable(!isAvailable)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
-                isAvailable
+              onClick={handleToggleTurn}
+              disabled={!isAccountActive}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                !isAccountActive
+                  ? 'bg-red-900/50 text-red-300 border border-red-700'
+                  : isAvailable
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                  : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
               }`}
             >
               <span
-                className={`w-2 h-2 rounded-full ${isAvailable ? 'bg-emerald-400 animate-ping' : 'bg-red-400'}`}
+                className={`w-2 h-2 rounded-full ${
+                  !isAccountActive
+                    ? 'bg-red-500'
+                    : isAvailable
+                    ? 'bg-emerald-400 animate-ping'
+                    : 'bg-amber-400'
+                }`}
               ></span>
-              <span>{isAvailable ? 'En Turno' : 'Pausado'}</span>
+              <span>
+                {!isAccountActive ? 'Suspendido' : isAvailable ? 'En Turno' : 'Pausado'}
+              </span>
             </button>
 
             {currentUser && (
@@ -195,6 +294,19 @@ export default function DriverPage() {
       </header>
 
       <main className="max-w-md mx-auto px-4 py-4 space-y-4">
+        {/* Banner de aviso si cuenta suspendida */}
+        {!isAccountActive && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-3.5 text-xs text-red-900 flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-black">Cuenta Suspendida por Administración</p>
+              <p className="text-[11px] text-red-700 mt-0.5">
+                Comunícate con la Torre de Control de DonDomi en Valledupar para reactivar tu perfil.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Banner de aviso o login */}
         {currentUser?.role !== 'DOMICILIARIO' && (
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3 flex items-start justify-between gap-2.5 text-xs text-blue-900">
@@ -209,7 +321,7 @@ export default function DriverPage() {
             </div>
             <button
               onClick={handleQuickDemoLogin}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-2.5 py-1.5 rounded-xl text-[11px] whitespace-nowrap shadow-xs"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-2.5 py-1.5 rounded-xl text-[11px] whitespace-nowrap shadow-xs cursor-pointer"
             >
               Iniciar Turno
             </button>
@@ -224,7 +336,7 @@ export default function DriverPage() {
           </div>
         )}
 
-        {/* Notificación de error / carrera ya tomada */}
+        {/* Notificación de error */}
         {errorNotice && (
           <div className="bg-red-600 text-white p-3 rounded-2xl text-xs font-bold shadow-md animate-in slide-in-from-top-2 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -232,30 +344,78 @@ export default function DriverPage() {
           </div>
         )}
 
-        {/* Resumen de Métricas del Domiciliario */}
-        <div className="grid grid-cols-3 gap-2 bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs text-center">
-          <div>
-            <span className="text-[10px] font-bold uppercase text-slate-400 block">Carreras Hoy</span>
-            <span className="text-xl font-black text-slate-900 mt-0.5 block">
-              {deliveredOrders.length}
-            </span>
+        {/* Billetera y Resumen Financiero del Domiciliario */}
+        <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Wallet className="w-4 h-4 text-orange-600" />
+              <span className="text-xs font-black text-slate-900">Mi Billetera & Efectivo</span>
+            </div>
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl text-[10px] font-bold">
+              <button
+                type="button"
+                onClick={() => setWalletPeriod('TODAY')}
+                className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                  walletPeriod === 'TODAY' ? 'bg-slate-900 text-white' : 'text-slate-600'
+                }`}
+              >
+                Hoy
+              </button>
+              <button
+                type="button"
+                onClick={() => setWalletPeriod('ALL')}
+                className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                  walletPeriod === 'ALL' ? 'bg-slate-900 text-white' : 'text-slate-600'
+                }`}
+              >
+                Histórico
+              </button>
+            </div>
           </div>
-          <div className="border-x border-slate-100">
-            <span className="text-[10px] font-bold uppercase text-slate-400 block">Ganancia</span>
-            <span className="text-xl font-black text-emerald-600 mt-0.5 block">
-              {formatCOP(totalEarnings)}
-            </span>
+
+          <div className="grid grid-cols-3 gap-2 text-center pt-1">
+            <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100">
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Entregas</span>
+              <span className="text-lg font-black text-slate-900 mt-0.5 block">
+                {settlement.completedDeliveries}
+              </span>
+            </div>
+            <div className="bg-emerald-50 p-2.5 rounded-2xl border border-emerald-100">
+              <span className="text-[10px] font-bold uppercase text-emerald-700 block">
+                Mi Ganancia
+              </span>
+              <span className="text-lg font-black text-emerald-600 mt-0.5 block">
+                {formatCOP(settlement.driverDeliveryEarnings)}
+              </span>
+            </div>
+            <div className="bg-amber-50 p-2.5 rounded-2xl border border-amber-100">
+              <span className="text-[10px] font-bold uppercase text-amber-800 block">
+                Efectivo Recibido
+              </span>
+              <span className="text-lg font-black text-amber-700 mt-0.5 block">
+                {formatCOP(settlement.totalCashCollectedFromCustomers)}
+              </span>
+            </div>
           </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase text-slate-400 block">Tarifa Domicilio</span>
-            <span className="text-xl font-black text-orange-600 mt-0.5 block">
-              {formatCOP(defaultFee)}
-            </span>
+
+          <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-[11px]">
+            <div className="text-slate-600">
+              <span>Comida en efectivo (entregar al local):</span>
+              <strong className="block text-slate-900 font-black">
+                {formatCOP(settlement.cashFoodToHandOverToRestaurants)}
+              </strong>
+            </div>
+            <div className="text-right text-slate-600">
+              <span>Domicilios digitales a mi favor:</span>
+              <strong className="block text-blue-600 font-black">
+                {formatCOP(settlement.digitalDeliveryFeesOwedToDriver)}
+              </strong>
+            </div>
           </div>
         </div>
 
         {/* SECCIÓN 1: CARRERA EN CURSO (SI TIENE PEDIDO ASIGNADO) */}
-        {activeOrder && (
+        {activeOrder && activeRestDetails && (
           <div className="bg-white rounded-3xl p-5 border-2 border-orange-500 shadow-lg space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2">
@@ -264,10 +424,17 @@ export default function DriverPage() {
                 </div>
                 <div>
                   <h3 className="text-sm font-black text-slate-900">
-                    Carrera Activa en Curso
+                    {activeOrder.status === 'ON_THE_WAY'
+                      ? 'En Ruta hacia el Cliente'
+                      : 'Paso 1: Recoger en Restaurante'}
                   </h3>
                   <p className="text-[11px] text-slate-500 font-bold">
-                    Orden {activeOrder.orderNumber}
+                    Orden #{activeOrder.orderNumber} ·{' '}
+                    {activeOrder.status === 'PREPARING'
+                      ? 'Preparándose en cocina'
+                      : activeOrder.status === 'READY_FOR_PICKUP'
+                      ? '¡Listo empacado para recoger!'
+                      : 'En camino al destino'}
                   </p>
                 </div>
               </div>
@@ -285,13 +452,14 @@ export default function DriverPage() {
                 </div>
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 block">
-                    Instrucción de Cobro
+                    Instrucción de Cobro en Efectivo
                   </span>
                   <p className="text-sm font-black text-amber-950">
-                    COBRAR EN EFECTIVO: {formatCOP(activeOrder.total)}
+                    COBRAR AL CLIENTE: {formatCOP(activeOrder.total)}
                   </p>
                   <p className="text-[11px] text-amber-900 mt-0.5 font-medium">
-                    Recibe el dinero en efectivo del cliente antes de entregar los alimentos.
+                    Comida: {formatCOP(activeOrder.subtotal)} + Tu domicilio:{' '}
+                    {formatCOP(activeOrder.deliveryFee || defaultFee)}.
                   </p>
                 </div>
               </div>
@@ -305,36 +473,59 @@ export default function DriverPage() {
                     Instrucción de Cobro
                   </span>
                   <p className="text-sm font-black text-emerald-950">
-                    YA PAGADO DIGITAL ({activeOrder.paymentMethod}) — NO COBRAR
+                    PAGO POR TRANSFERENCIA ({activeOrder.paymentMethod}) — NO COBRAR AL CLIENTE
                   </p>
                   <p className="text-[11px] text-emerald-900 mt-0.5 font-medium">
-                    El cliente ya pagó la orden completa en línea. Solo entrega la comida.
+                    El cliente transfiere a la cuenta del restaurante. Tu domicilio de{' '}
+                    <strong>{formatCOP(activeOrder.deliveryFee || defaultFee)}</strong> queda a tu favor en la liquidación del restaurante.
                   </p>
                 </div>
               </div>
             )}
 
-            {/* Ruta en Valledupar */}
-            <div className="space-y-3 relative pl-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-              {/* Punto A: Recogida */}
-              <div className="relative">
+            {/* Ruta en Valledupar con Dirección Exacta en Punto A y Punto B */}
+            <div className="space-y-3.5 relative pl-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+              {/* Punto A: Recogida en Restaurante */}
+              <div className="relative space-y-1.5">
                 <span className="absolute -left-6 top-1 w-3.5 h-3.5 rounded-full bg-orange-600 border-2 border-white shadow-xs"></span>
                 <span className="text-[10px] font-bold uppercase text-slate-400 block">
                   1. Recoger en Restaurante
                 </span>
-                <p className="text-xs font-bold text-slate-900">{activeOrder.restaurantName}</p>
-                <p className="text-[11px] text-slate-500">Valledupar, Cesar</p>
+                <p className="text-xs font-black text-slate-900">{activeOrder.restaurantName}</p>
+                <p className="text-[11px] text-slate-600 font-medium">
+                  📍 {activeRestDetails.address} · {activeRestDetails.neighborhood}
+                </p>
+                <div className="flex items-center gap-2 pt-0.5">
+                  <a
+                    href={`tel:${activeRestDetails.phone}`}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1"
+                  >
+                    <Phone className="w-3 h-3" />
+                    <span>Llamar Local</span>
+                  </a>
+                  <a
+                    href={`https://wa.me/57${activeRestDetails.phone}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1"
+                  >
+                    <MessageCircle className="w-3 h-3" />
+                    <span>WhatsApp Local</span>
+                  </a>
+                </div>
               </div>
 
-              {/* Punto B: Entrega */}
-              <div className="relative pt-1">
+              {/* Punto B: Entrega al Cliente */}
+              <div className="relative pt-1 space-y-1">
                 <span className="absolute -left-6 top-2.5 w-3.5 h-3.5 rounded-full bg-emerald-600 border-2 border-white shadow-xs"></span>
                 <span className="text-[10px] font-bold uppercase text-slate-400 block">
                   2. Entregar al Cliente
                 </span>
-                <p className="text-xs font-bold text-slate-900">{activeOrder.customerName}</p>
+                <p className="text-xs font-black text-slate-900">
+                  {activeOrder.customerName} ({activeOrder.customerPhone})
+                </p>
                 <p className="text-[11px] text-slate-600 font-medium">
-                  {activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.neighborhood}
+                  📍 {activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.neighborhood}
                 </p>
                 {activeOrder.deliveryAddress.reference && (
                   <p className="text-[11px] text-amber-700 bg-amber-50 px-2 py-1 rounded-lg mt-1 border border-amber-200 inline-block">
@@ -344,17 +535,22 @@ export default function DriverPage() {
               </div>
             </div>
 
-            {/* Información del pedido */}
-            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs space-y-1.5">
-              <div className="flex justify-between text-slate-600">
-                <span>Platos del pedido:</span>
-                <span className="font-semibold text-slate-800">
+            {/* Detalle de ítems del paquete */}
+            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs space-y-1">
+              <div className="flex justify-between font-bold text-slate-700">
+                <span>Contenido del paquete:</span>
+                <span>
                   {activeOrder.items.reduce((s, i) => s + i.quantity, 0)} unidades
                 </span>
               </div>
+              {activeOrder.items.map((it) => (
+                <p key={it.id} className="text-[11px] text-slate-600">
+                  • <strong>{it.quantity}x</strong> {it.productName}
+                </p>
+              ))}
             </div>
 
-            {/* Botones de contacto y GPS */}
+            {/* Botones de contacto y GPS al Cliente */}
             <div className="grid grid-cols-2 gap-2">
               <a
                 href={`tel:${activeOrder.customerPhone || '3001234567'}`}
@@ -376,19 +572,31 @@ export default function DriverPage() {
                 className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 border border-blue-200 transition"
               >
                 <Navigation className="w-3.5 h-3.5 text-blue-600" />
-                <span>Ruta GPS</span>
+                <span>Ruta GPS Cliente</span>
               </a>
             </div>
 
-            {/* Confirmar entrega o Liberar carrera */}
+            {/* Paso 1 (Confirmar Recogida) o Paso 2 (Confirmar Entrega) + Liberar carrera */}
             <div className="space-y-2 pt-1">
-              <button
-                onClick={() => handleDeliver(activeOrder.id)}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 transition text-sm flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Confirmar Entrega Realizada</span>
-              </button>
+              {activeOrder.status !== 'ON_THE_WAY' ? (
+                <button
+                  type="button"
+                  onClick={() => handleConfirmPickup(activeOrder.id, activeOrder.orderNumber)}
+                  className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-3.5 rounded-2xl shadow-lg shadow-orange-600/25 transition text-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <PackageCheck className="w-4 h-4" />
+                  <span>Ya Recogí el Pedido · Iniciar Ruta</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleDeliver(activeOrder.id)}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 transition text-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Confirmar Entrega Realizada</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -407,7 +615,7 @@ export default function DriverPage() {
           <div className="flex items-center justify-between">
             <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
               <Bike className="w-4 h-4 text-orange-600" />
-              <span>Carreras Disponibles ({availableOrders.length})</span>
+              <span>Radar de Carreras Disponibles ({availableOrders.length})</span>
             </h3>
             <span className="text-[11px] text-slate-400 font-semibold">
               Tarifa {formatCOP(defaultFee)}
@@ -417,98 +625,122 @@ export default function DriverPage() {
           {availableOrders.length === 0 ? (
             <div className="bg-white rounded-3xl p-6 border border-slate-200 text-center space-y-1.5">
               <Clock className="w-6 h-6 text-slate-300 mx-auto" />
-              <p className="font-bold text-slate-700 text-xs">No hay carreras pendientes</p>
+              <p className="font-bold text-slate-700 text-xs">No hay carreras listas por tomar</p>
               <p className="text-[11px] text-slate-400">
-                Cuando los restaurantes preparen nuevos pedidos, aparecerán aquí de inmediato.
+                Cuando las cocinas acepten o empaquen nuevos pedidos, aparecerán aquí en tiempo real.
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {availableOrders.map((order) => (
-                <div
-                  key={order.id}
-                  className="bg-white rounded-3xl p-4 border border-slate-200 shadow-xs space-y-3 hover:border-orange-300 transition"
-                >
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <div>
-                      <span className="text-xs font-black text-slate-900">
-                        {order.orderNumber}
-                      </span>
-                      <span className="text-[10px] text-slate-400 block">
-                        Restaurante: {order.restaurantName}
-                      </span>
-                    </div>
-                    <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-                      +{formatCOP(order.deliveryFee || defaultFee)}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1.5 text-xs text-slate-600">
-                    <div className="flex items-start gap-1.5">
-                      <Store className="w-3.5 h-3.5 text-orange-600 mt-0.5 flex-shrink-0" />
-                      <span>
-                        <strong>Recoger:</strong> {order.restaurantName}
-                      </span>
-                    </div>
-                    <div className="flex items-start gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-emerald-600 mt-0.5 flex-shrink-0" />
-                      <span>
-                        <strong>Llevar a:</strong> {order.deliveryAddress.street},{' '}
-                        {order.deliveryAddress.neighborhood}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    <div>
-                      {order.paymentMethod === 'EFECTIVO' ? (
-                        <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                          Cobrar Efectivo: {formatCOP(order.total)}
+              {availableOrders.map((order) => {
+                const restInfo = getRestaurantDetails(order.restaurantId, order.restaurantName);
+                return (
+                  <div
+                    key={order.id}
+                    className="bg-white rounded-3xl p-4 border border-slate-200 shadow-xs space-y-3 hover:border-orange-300 transition"
+                  >
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-slate-900">
+                          #{order.orderNumber}
                         </span>
-                      ) : (
-                        <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                          Pagado Digital ({order.paymentMethod})
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            order.status === 'READY_FOR_PICKUP'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {order.status === 'READY_FOR_PICKUP' ? '📦 Listo para recoger' : '🍳 En preparación'}
                         </span>
-                      )}
+                      </div>
+                      <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                        +{formatCOP(order.deliveryFee || defaultFee)}
+                      </span>
                     </div>
-                    <button
-                      onClick={() => handleClaim(order)}
-                      className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-4 py-2 rounded-xl text-xs shadow-md shadow-orange-500/20 transition flex items-center gap-1.5"
-                    >
-                      <Bike className="w-3.5 h-3.5" />
-                      <span>Aceptar Carrera</span>
-                    </button>
+
+                    <div className="space-y-1.5 text-xs text-slate-600">
+                      <div className="flex items-start gap-1.5">
+                        <Store className="w-3.5 h-3.5 text-orange-600 mt-0.5 flex-shrink-0" />
+                        <span>
+                          <strong>Recoger:</strong> {order.restaurantName} ({restInfo.address},{' '}
+                          {restInfo.neighborhood})
+                        </span>
+                      </div>
+                      <div className="flex items-start gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-emerald-600 mt-0.5 flex-shrink-0" />
+                        <span>
+                          <strong>Llevar a:</strong> {order.deliveryAddress.street},{' '}
+                          {order.deliveryAddress.neighborhood}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        {order.paymentMethod === 'EFECTIVO' ? (
+                          <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                            Cobrar Efectivo: {formatCOP(order.total)}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                            Transferencia ({order.paymentMethod})
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!!activeOrder || !isAvailable || !isAccountActive}
+                        onClick={() => handleClaim(order)}
+                        className={`font-extrabold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 ${
+                          !!activeOrder || !isAvailable || !isAccountActive
+                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                            : 'bg-orange-600 hover:bg-orange-500 text-white shadow-md shadow-orange-500/20 cursor-pointer'
+                        }`}
+                      >
+                        <Bike className="w-3.5 h-3.5" />
+                        <span>Aceptar Carrera</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* SECCIÓN 3: HISTORIAL DE ENTREGAS COMPLETADAS HOY */}
-        {deliveredOrders.length > 0 && (
+        {/* SECCIÓN 3: HISTORIAL DE ENTREGAS COMPLETADAS */}
+        {filteredDeliveredOrders.length > 0 && (
           <div className="space-y-2 pt-2">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">
-              Entregas completadas hoy ({deliveredOrders.length})
+              Entregas completadas ({walletPeriod === 'TODAY' ? 'Hoy' : 'Histórico'}:{' '}
+              {filteredDeliveredOrders.length})
             </h4>
             <div className="space-y-2">
-              {deliveredOrders.map((o) => (
+              {filteredDeliveredOrders.map((o) => (
                 <div
                   key={o.id}
                   className="bg-white p-3 rounded-2xl border border-slate-200 text-xs flex items-center justify-between"
                 >
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                     <div>
-                      <span className="font-bold text-slate-900">{o.orderNumber}</span>
+                      <span className="font-bold text-slate-900">#{o.orderNumber}</span>
                       <span className="text-[11px] text-slate-400 block">
-                        {o.deliveryAddress.neighborhood} · {o.restaurantName}
+                        {o.deliveryAddress.neighborhood} · {o.restaurantName} ({o.paymentMethod})
                       </span>
                     </div>
                   </div>
-                  <span className="font-extrabold text-emerald-600">
-                    +{formatCOP(o.deliveryFee || defaultFee)}
-                  </span>
+                  <div className="text-right">
+                    <span className="font-extrabold text-emerald-600 block">
+                      +{formatCOP(o.deliveryFee || defaultFee)}
+                    </span>
+                    {o.paymentMethod === 'EFECTIVO' && (
+                      <span className="text-[10px] text-amber-700 font-semibold">
+                        Recaudado: {formatCOP(o.total)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -545,6 +777,7 @@ export default function DriverPage() {
                     'Avería o pinchazo en la motocicleta',
                     'Emergencia médica o personal en la vía',
                     'Lluvia torrencial / Vía intransitable',
+                    'Demora excesiva en restaurante',
                     'Accidente de tránsito',
                     'Otro percance',
                   ].map((r) => (

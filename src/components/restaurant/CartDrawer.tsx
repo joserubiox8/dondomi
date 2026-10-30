@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   X,
@@ -11,22 +11,23 @@ import {
   CheckCircle2,
   ArrowRight,
   MessageCircle,
-  MapPin,
-  User,
-  Phone,
   AlertCircle,
   Loader2,
+  Copy,
+  Check,
+  Wallet,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
-import { calculateDeliveryEstimate } from '@/lib/delivery';
 import { calculateOrderPricing } from '@/lib/pricing';
-import { Order, OrderItem } from '@/types';
+import { Order, OrderItem, PaymentMethod } from '@/types';
 
 interface CartDrawerProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const CUSTOMER_PROFILE_KEY = 'dondomi_customer_profile_v1';
 
 export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const {
@@ -34,17 +35,15 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     cartRestaurantId,
     cartRestaurantName,
     updateCartQuantity,
-    removeFromCart,
     clearCart,
     cartSubtotal,
-    currentNeighborhood,
     restaurants,
     productsByRestaurant,
     addOrder,
     globalDeliveryFee,
   } = useApp();
 
-  const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD'>('NEQUI');
+  const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD'>('EFECTIVO');
   const [customerName, setCustomerName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
   const [deliveryNeighborhood, setDeliveryNeighborhood] = useState<string>('');
@@ -55,24 +54,106 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [checkoutStage, setCheckoutStage] = useState<'IDLE' | 'SENDING' | 'CONFIRMED'>('IDLE');
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [copiedAccount, setCopiedAccount] = useState<boolean>(false);
 
   // Idempotencia en reintentos de orden (evita duplicar pedidos ante errores de red)
   const [draftOrderId, setDraftOrderId] = useState<string | null>(null);
   const [draftOrderNumber, setDraftOrderNumber] = useState<string | null>(null);
 
+  // Cargar datos frecuentes del cliente desde localStorage al montar
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(CUSTOMER_PROFILE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.customerName) setCustomerName(parsed.customerName);
+          if (parsed.customerPhone) setCustomerPhone(String(parsed.customerPhone).replace(/\D/g, '').slice(0, 10));
+          if (parsed.deliveryNeighborhood) setDeliveryNeighborhood(parsed.deliveryNeighborhood);
+          if (parsed.deliveryStreet) setDeliveryStreet(parsed.deliveryStreet);
+          if (parsed.deliveryReference) setDeliveryReference(parsed.deliveryReference);
+        }
+      } catch {}
+    }
+  }, []);
+
   // Reiniciar borrador si el contenido de la canasta cambia
-  React.useEffect(() => {
+  useEffect(() => {
     setDraftOrderId(null);
     setDraftOrderNumber(null);
   }, [cart.length, cartSubtotal]);
 
+  const currentRestaurant = restaurants.find((r) => r.id === cartRestaurantId);
+
+  // Filtrar métodos de pago habilitados por el restaurante actual
+  const availablePaymentMethods = useMemo(() => {
+    const list: { id: 'EFECTIVO' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD'; label: string }[] = [];
+    if (!currentRestaurant || currentRestaurant.acceptsCash !== false) {
+      list.push({ id: 'EFECTIVO', label: 'Efectivo' });
+    }
+    if (!currentRestaurant || currentRestaurant.acceptsNequi !== false) {
+      list.push({ id: 'NEQUI', label: 'Nequi' });
+    }
+    if (!currentRestaurant || currentRestaurant.acceptsBreb !== false) {
+      list.push({ id: 'BRE_B', label: 'Llave Bre-B' });
+    }
+    if (!currentRestaurant || currentRestaurant.acceptsDaviplata !== false) {
+      list.push({ id: 'DAVIPLATA', label: 'Daviplata' });
+    }
+    if (currentRestaurant?.acceptsCard === true) {
+      list.push({ id: 'CARD', label: 'Tarjeta (Wompi)' });
+    }
+    return list.length > 0 ? list : [{ id: 'EFECTIVO' as const, label: 'Efectivo' }];
+  }, [currentRestaurant]);
+
+  // Asegurar que el método seleccionado esté entre los permitidos por el restaurante
+  useEffect(() => {
+    if (!availablePaymentMethods.some((m) => m.id === paymentMethod)) {
+      setPaymentMethod(availablePaymentMethods[0].id);
+    }
+  }, [availablePaymentMethods, paymentMethod]);
+
   if (!isOpen) return null;
 
-  const currentRestaurant = restaurants.find((r) => r.id === cartRestaurantId);
   const pricing = calculateOrderPricing(cartSubtotal, globalDeliveryFee);
   const deliveryFee = pricing.deliveryFee;
-  const platformFee = pricing.serviceFee;
   const grandTotal = pricing.total;
+  const minOrderAmount = currentRestaurant?.minOrderAmount || 0;
+  const isBelowMinOrder = minOrderAmount > 0 && cartSubtotal < minOrderAmount;
+
+  // Obtener cuenta de transferencia del negocio según el medio elegido
+  const getTransferAccountInfo = (method: string) => {
+    const fallbackPhone = (currentRestaurant?.phone || '3004567890').replace(/\D/g, '');
+    if (method === 'NEQUI') {
+      return {
+        label: 'Cuenta Nequi del Restaurante',
+        value: currentRestaurant?.nequiNumber || fallbackPhone,
+      };
+    }
+    if (method === 'DAVIPLATA') {
+      return {
+        label: 'Daviplata del Restaurante',
+        value: currentRestaurant?.daviplataNumber || fallbackPhone,
+      };
+    }
+    if (method === 'BRE_B') {
+      return {
+        label: 'Llave Bre-B del Restaurante',
+        value: currentRestaurant?.brebKey || fallbackPhone,
+      };
+    }
+    return null;
+  };
+
+  const activeTransferInfo = getTransferAccountInfo(paymentMethod);
+
+  const handleCopyAccount = (val: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(val).catch(() => {});
+    }
+    setCopiedAccount(true);
+    setTimeout(() => setCopiedAccount(false), 2500);
+  };
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,8 +171,22 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       return;
     }
 
-    if (currentRestaurant && currentRestaurant.isOpen === false) {
+    if (
+      currentRestaurant &&
+      (currentRestaurant.isOpen === false ||
+        currentRestaurant.accountStatus === 'SUSPENDED' ||
+        currentRestaurant.accountStatus === 'ARCHIVED')
+    ) {
       setCheckoutError('El restaurante se encuentra cerrado en este momento y no puede recibir pedidos.');
+      return;
+    }
+
+    if (isBelowMinOrder) {
+      setCheckoutError(
+        `El pedido mínimo en ${currentRestaurant?.name || 'este restaurante'} es de ${formatCOP(
+          minOrderAmount
+        )} (en platos). Te faltan ${formatCOP(minOrderAmount - cartSubtotal)}.`
+      );
       return;
     }
 
@@ -103,6 +198,22 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
         setCheckoutError(`El producto "${item.product.name}" se agotó en cocina. Elimínalo de tu canasta antes de continuar.`);
         return;
       }
+    }
+
+    // Guardar perfil de entrega del cliente en localStorage para próximas compras
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(
+          CUSTOMER_PROFILE_KEY,
+          JSON.stringify({
+            customerName: customerName.trim(),
+            customerPhone: cleanPhone,
+            deliveryNeighborhood: deliveryNeighborhood.trim(),
+            deliveryStreet: deliveryStreet.trim(),
+            deliveryReference: deliveryReference.trim(),
+          })
+        );
+      } catch {}
     }
 
     // Idempotencia: Si ya teníamos un borrador generado por un reintento fallido, lo reutilizamos
@@ -128,7 +239,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     const newOrder: Order = {
       id: orderId,
       orderNumber,
-      customerId: `cust-${Date.now()}`,
+      customerId: cleanPhone,
       customerName: customerName.trim(),
       customerPhone: cleanPhone,
       restaurantId: cartRestaurantId || 'rest-1',
@@ -139,8 +250,8 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       deliveryFee,
       serviceFee: 0,
       total: grandTotal,
-      paymentMethod,
-      paymentStatus: paymentMethod === 'EFECTIVO' ? 'PENDING' : 'COMPLETED',
+      paymentMethod: paymentMethod as PaymentMethod,
+      paymentStatus: 'PENDING',
       deliveryAddress: {
         id: `addr-${Date.now()}`,
         label: 'Entrega',
@@ -151,18 +262,18 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       },
       customerNotes: orderNotes.trim() || undefined,
       createdAt: new Date().toISOString(),
-      estimatedDeliveryTime: '30–45 min',
+      estimatedDeliveryTime: currentRestaurant
+        ? `${currentRestaurant.estimatedTimeMin}–${currentRestaurant.estimatedTimeMax} min`
+        : '30–45 min',
     };
 
     setIsSubmitting(true);
     setCheckoutStage('SENDING');
 
     try {
-      // Garantizar al menos 1.5s de animación visible de envío
       const minAnimationTimer = new Promise((resolve) => setTimeout(resolve, 1500));
       await Promise.all([addOrder(newOrder), minAnimationTimer]);
 
-      // Guardar lista de múltiples pedidos activos concurrentes en localStorage
       if (typeof window !== 'undefined') {
         let activeOrders: string[] = [];
         try {
@@ -181,12 +292,10 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
         localStorage.setItem('dondomi_active_order_time', Date.now().toString());
       }
 
-      // Animación de éxito confirmada
       setCheckoutStage('CONFIRMED');
       await new Promise((resolve) => setTimeout(resolve, 1200));
 
       setPlacedOrder(newOrder);
-      // Limpiar borrador de idempotencia una vez confirmado con éxito
       setDraftOrderId(null);
       setDraftOrderNumber(null);
       setCheckoutStage('IDLE');
@@ -218,6 +327,11 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       })
       .join('\n');
 
+    const transferNote =
+      order.paymentMethod !== 'EFECTIVO'
+        ? `\n_Adjunto comprobante de transferencia (${order.paymentMethod})._`
+        : '';
+
     const message = `*¡Hola ${currentRestaurant?.name || 'DonDomi'}! Acabo de hacer un pedido por la plataforma:*
 
 *Orden:* #${order.orderNumber}
@@ -231,13 +345,15 @@ ${itemsSummary}
 *Subtotal:* ${formatCOP(order.subtotal)}
 *Domicilio:* ${formatCOP(order.deliveryFee)}
 *Total a pagar:* *${formatCOP(order.total)}*
-*Método de Pago:* ${order.paymentMethod}
+*Método de Pago:* ${order.paymentMethod}${transferNote}
 ${order.customerNotes ? `\n*Observaciones:* ${order.customerNotes}` : ''}
 
 _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
 
     return `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(message)}`;
   };
+
+  const placedTransferInfo = placedOrder ? getTransferAccountInfo(placedOrder.paymentMethod) : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
@@ -262,7 +378,6 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
         </div>
 
         {checkoutStage === 'SENDING' ? (
-          // Animación de envío en progreso
           <div className="p-8 sm:p-12 text-center flex flex-col items-center justify-center space-y-6 flex-1 min-h-[380px] animate-in fade-in">
             <div className="relative w-24 h-24 flex items-center justify-center">
               <div className="absolute inset-0 rounded-full bg-orange-500/20 animate-ping" />
@@ -286,7 +401,6 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
             </div>
           </div>
         ) : checkoutStage === 'CONFIRMED' ? (
-          // Animación de pedido confirmado
           <div className="p-8 sm:p-12 text-center flex flex-col items-center justify-center space-y-5 flex-1 min-h-[380px] animate-in zoom-in-95 duration-300">
             <div className="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-xl shadow-emerald-500/20 animate-bounce">
               <CheckCircle2 className="w-12 h-12" />
@@ -304,7 +418,6 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
             </div>
           </div>
         ) : placedOrder ? (
-          // Vista de confirmación con botón directo a WhatsApp
           <div className="p-6 text-center space-y-4 overflow-y-auto">
             <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
               <CheckCircle2 className="w-10 h-10" />
@@ -318,6 +431,28 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 El restaurante <strong>{placedOrder.restaurantName}</strong> ya tiene tu orden registrada en su pantalla.
               </p>
             </div>
+
+            {placedTransferInfo && (
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 text-left space-y-2 text-xs text-blue-950">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-blue-700">
+                    {placedTransferInfo.label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyAccount(placedTransferInfo.value)}
+                    className="bg-white hover:bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition"
+                  >
+                    {copiedAccount ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedAccount ? '¡Copiado!' : 'Copiar'}</span>
+                  </button>
+                </div>
+                <p className="text-sm font-black font-mono text-slate-900">{placedTransferInfo.value}</p>
+                <p className="text-[11px] text-blue-800">
+                  Realiza la transferencia por <strong>{formatCOP(placedOrder.total)}</strong> a la cuenta del restaurante y envía el comprobante por WhatsApp.
+                </p>
+              </div>
+            )}
 
             <div className="bg-slate-50 rounded-2xl p-4 text-left border border-slate-200 space-y-2 text-xs text-slate-700">
               <div className="flex justify-between font-bold text-slate-900">
@@ -336,7 +471,6 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               </div>
             </div>
 
-            {/* Botón Seguimiento en vivo */}
             <Link
               href={`/order/${placedOrder.orderNumber}`}
               onClick={() => {
@@ -349,7 +483,6 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               <span>🛵 Rastrear mi Pedido en Tiempo Real</span>
             </Link>
 
-            {/* Botón WhatsApp */}
             <a
               href={generateWhatsAppUrl(placedOrder)}
               target="_blank"
@@ -357,7 +490,11 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-4 rounded-2xl shadow-md flex items-center justify-center gap-2 text-xs transition"
             >
               <MessageCircle className="w-4 h-4" />
-              <span>Enviar Copia por WhatsApp al Restaurante</span>
+              <span>
+                {placedOrder.paymentMethod === 'EFECTIVO'
+                  ? 'Enviar Copia por WhatsApp al Restaurante'
+                  : 'Enviar Comprobante de Pago por WhatsApp'}
+              </span>
             </a>
 
             <button
@@ -372,20 +509,32 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
             </button>
           </div>
         ) : cart.length === 0 ? (
-          // Carrito vacío
           <div className="p-8 text-center space-y-3">
             <p className="text-sm font-semibold text-slate-700">Tu canasta está vacía</p>
             <p className="text-xs text-slate-400">Agrega platos desde el menú del restaurante.</p>
           </div>
         ) : (
-          // Lista de items y formulario de entrega
           <form onSubmit={handleCheckout} className="flex flex-col flex-1 overflow-hidden">
             <div className="p-4 overflow-y-auto space-y-4 flex-1 divide-y divide-slate-100">
               {/* Platos seleccionados */}
               <div className="space-y-3">
-                <span className="text-xs font-extrabold text-slate-900 uppercase tracking-wider block">
-                  Platos seleccionados
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                    Platos seleccionados
+                  </span>
+                  {minOrderAmount > 0 && (
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        isBelowMinOrder
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-emerald-100 text-emerald-800'
+                      }`}
+                    >
+                      Mínimo: {formatCOP(minOrderAmount)}
+                    </span>
+                  )}
+                </div>
+
                 {cart.map((item) => (
                   <div key={item.id} className="flex items-start justify-between gap-3 bg-slate-50/70 p-3 rounded-2xl border border-slate-100">
                     <div className="flex-1 min-w-0">
@@ -435,7 +584,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 <div className="space-y-2 text-xs">
                   <div>
                     <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Nombre de quien recibe
+                      Nombre de quien recibe *
                     </label>
                     <input
                       type="text"
@@ -469,7 +618,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
 
                   <div>
                     <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Barrio *
+                      Barrio en Valledupar *
                     </label>
                     <input
                       type="text"
@@ -507,27 +656,34 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                     />
                   </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                      Observaciones para el pedido (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Traer cambio de $50.000, timbrar en el segundo piso"
+                      value={orderNotes}
+                      onChange={(e) => setOrderNotes(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Selector de método de pago */}
-              <div className="pt-4 space-y-2">
+              {/* Selector de método de pago filtrado según lo que acepta el restaurante */}
+              <div className="pt-4 space-y-2.5">
                 <span className="text-xs font-extrabold text-slate-900 uppercase tracking-wider block">
-                  Forma de pago
+                  Forma de pago en {currentRestaurant?.name || 'el restaurante'}
                 </span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {[
-                    { id: 'NEQUI', label: 'Nequi' },
-                    { id: 'BRE_B', label: 'Llave Bre-B' },
-                    { id: 'DAVIPLATA', label: 'Daviplata' },
-                    { id: 'EFECTIVO', label: 'Efectivo' },
-                    { id: 'CARD', label: 'Tarjeta (Wompi)' },
-                  ].map((method) => (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {availablePaymentMethods.map((method) => (
                     <button
                       type="button"
                       key={method.id}
-                      onClick={() => setPaymentMethod(method.id as any)}
-                      className={`p-2.5 rounded-xl text-xs font-bold border transition text-center ${
+                      onClick={() => setPaymentMethod(method.id)}
+                      className={`p-2.5 rounded-xl text-xs font-bold border transition text-center cursor-pointer ${
                         paymentMethod === method.id
                           ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-2xs'
                           : 'border-slate-200 text-slate-600 bg-white hover:bg-slate-50'
@@ -537,6 +693,30 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                     </button>
                   ))}
                 </div>
+
+                {/* Cuadro con datos de transferencia directa a la cuenta del restaurante */}
+                {activeTransferInfo && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3 space-y-1.5 text-xs text-blue-950 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 flex items-center gap-1">
+                        <Wallet className="w-3.5 h-3.5" />
+                        <span>{activeTransferInfo.label}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyAccount(activeTransferInfo.value)}
+                        className="bg-white hover:bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
+                      >
+                        {copiedAccount ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedAccount ? '¡Copiado!' : 'Copiar'}</span>
+                      </button>
+                    </div>
+                    <p className="text-sm font-black font-mono text-slate-900">{activeTransferInfo.value}</p>
+                    <p className="text-[11px] text-blue-800 leading-snug">
+                      El pago por <strong>{formatCOP(grandTotal)}</strong> se transfiere directamente a la cuenta de <strong>{currentRestaurant?.name}</strong>. Al confirmar tu orden podrás enviar el comprobante por WhatsApp.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Resumen de costos */}
@@ -561,6 +741,16 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
 
             {/* Bottom Checkout Button & Error Banner */}
             <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3">
+              {isBelowMinOrder && !checkoutError && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-2.5 text-xs text-amber-900 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <span>
+                    Pedido mínimo: <strong>{formatCOP(minOrderAmount)}</strong> (te faltan{' '}
+                    <strong>{formatCOP(minOrderAmount - cartSubtotal)}</strong> en platos).
+                  </span>
+                </div>
+              )}
+
               {checkoutError && (
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-3 flex items-start gap-2.5 text-xs text-red-800 animate-in fade-in">
                   <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
@@ -573,9 +763,21 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
 
               <button
                 type="submit"
-                disabled={isSubmitting || (currentRestaurant && currentRestaurant.isOpen === false)}
+                disabled={
+                  isSubmitting ||
+                  isBelowMinOrder ||
+                  (currentRestaurant &&
+                    (currentRestaurant.isOpen === false ||
+                      currentRestaurant.accountStatus === 'SUSPENDED' ||
+                      currentRestaurant.accountStatus === 'ARCHIVED'))
+                }
                 className={`w-full text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg flex items-center justify-between transition ${
-                  isSubmitting || (currentRestaurant && currentRestaurant.isOpen === false)
+                  isSubmitting ||
+                  isBelowMinOrder ||
+                  (currentRestaurant &&
+                    (currentRestaurant.isOpen === false ||
+                      currentRestaurant.accountStatus === 'SUSPENDED' ||
+                      currentRestaurant.accountStatus === 'ARCHIVED'))
                     ? 'bg-slate-400 cursor-not-allowed opacity-80'
                     : 'bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 shadow-orange-500/25 active:scale-[0.98] cursor-pointer'
                 }`}

@@ -7,17 +7,22 @@ import RestaurantCard from './RestaurantCard';
 import { Store, UtensilsCrossed } from 'lucide-react';
 
 export default function RestaurantList() {
-  const { searchQuery, selectedCategorySlug, onlyOpenFilter, restaurants } = useApp();
+  const { searchQuery, selectedCategorySlug, onlyOpenFilter, restaurants, categories } = useApp();
 
   // Encontrar el nombre de la categoría seleccionada (si aplica)
   const activeCategory = useMemo(() => {
     if (!selectedCategorySlug) return null;
-    return FOOD_CATEGORIES.find((c) => c.slug === selectedCategorySlug);
-  }, [selectedCategorySlug]);
+    return (
+      categories.find((c) => c.slug === selectedCategorySlug) ||
+      FOOD_CATEGORIES.find((c) => c.slug === selectedCategorySlug)
+    );
+  }, [selectedCategorySlug, categories]);
 
-  // Filtrado de restaurantes
+  // Filtrado de restaurantes (excluyendo suspendidos o archivados)
   const filteredRestaurants = useMemo(() => {
     return restaurants.filter((r) => {
+      if (r.accountStatus === 'SUSPENDED' || r.accountStatus === 'ARCHIVED') return false;
+
       // Filtro de abiertos
       if (onlyOpenFilter && !r.isOpen) return false;
 

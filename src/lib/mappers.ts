@@ -1,9 +1,39 @@
 import { Restaurant, Product, FoodCategory, Driver } from '@/types';
-import { RESTAURANTS, PRODUCTS_BY_RESTAURANT } from '@/data/mockData';
-import { supabase } from '@/lib/supabase';
+import { RESTAURANTS } from '@/data/mockData';
+
+const RESTAURANT_META_STORAGE_KEY = 'dondomi_restaurants_meta_v1';
+
+export function getLocalRestaurantsMeta(): Record<string, Partial<Restaurant>> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(RESTAURANT_META_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveLocalRestaurantMeta(rest: Restaurant) {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = getLocalRestaurantsMeta();
+    current[rest.id] = {
+      email: rest.email,
+      pin: rest.pin,
+      accountStatus: rest.accountStatus || 'ACTIVE',
+      nequiNumber: rest.nequiNumber,
+      daviplataNumber: rest.daviplataNumber,
+      brebKey: rest.brebKey,
+      acceptsBreb: rest.acceptsBreb,
+      acceptsCard: rest.acceptsCard,
+    };
+    localStorage.setItem(RESTAURANT_META_STORAGE_KEY, JSON.stringify(current));
+  } catch {}
+}
 
 // Convertir de modelo TypeScript (camelCase) a Supabase (snake_case)
 export function restaurantToDb(r: Restaurant) {
+  saveLocalRestaurantMeta(r);
   return {
     id: r.id,
     name: r.name,
@@ -17,7 +47,7 @@ export function restaurantToDb(r: Restaurant) {
     address: r.address,
     neighborhood: r.neighborhood,
     phone: r.phone,
-    is_open: r.isOpen,
+    is_open: r.accountStatus && r.accountStatus !== 'ACTIVE' ? false : r.isOpen,
     opening_hours: r.openingHours,
     estimated_time_min: r.estimatedTimeMin,
     estimated_time_max: r.estimatedTimeMax,
@@ -29,40 +59,53 @@ export function restaurantToDb(r: Restaurant) {
     accepts_daviplata: r.acceptsDaviplata,
     accepts_breb: r.acceptsBreb ?? true,
     accepts_card: r.acceptsCard ?? false,
-    featured: r.featured || false,
+    featured: false,
     pin: r.pin || '1234',
   };
 }
 
 export function dbToRestaurant(data: any): Restaurant {
+  const metaMap = getLocalRestaurantsMeta();
+  const localMeta = metaMap[data.id] || {};
+  const seed = RESTAURANTS.find((ir) => ir.id === data.id);
+  const cleanPhone = (data.phone || seed?.phone || '3004567890').replace(/\D/g, '');
+
   return {
     id: data.id,
     name: data.name,
     slug: data.slug,
     description: data.description || '',
-    logoUrl: data.logo_url || '',
-    bannerUrl: data.banner_url || '',
+    logoUrl:
+      data.logo_url ||
+      'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=200&q=80',
+    bannerUrl:
+      data.banner_url ||
+      'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80',
     rating: Number(data.rating) || 5.0,
-    reviewsCount: Number(data.reviews_count) || 0,
-    tags: data.tags || [],
-    address: data.address,
-    neighborhood: data.neighborhood,
-    phone: data.phone,
+    reviewsCount: Number(data.reviews_count) || 1,
+    tags: data.tags || ['Valledupar'],
+    address: data.address || 'Valledupar, Cesar',
+    neighborhood: data.neighborhood || 'Centro',
+    phone: data.phone || '300 000 0000',
     isOpen: data.is_open ?? true,
     openingHours: data.opening_hours || '11:00 AM - 10:00 PM',
     estimatedTimeMin: data.estimated_time_min || 25,
     estimatedTimeMax: data.estimated_time_max || 40,
     deliveryFeeBase: Number(data.delivery_fee_base) || 7000,
-    minOrderAmount: Number(data.min_order_amount) || 15000,
+    minOrderAmount: Number(data.min_order_amount) ?? 0,
     commissionRate: Number(data.commission_rate) || 0,
     acceptsCash: data.accepts_cash ?? true,
     acceptsNequi: data.accepts_nequi ?? true,
-    acceptsBreb: data.accepts_breb ?? true,
+    acceptsBreb: localMeta.acceptsBreb ?? data.accepts_breb ?? true,
     acceptsDaviplata: data.accepts_daviplata ?? true,
-    acceptsCard: data.accepts_card ?? false,
-    featured: data.featured ?? false,
-    pin: data.pin || '1234',
-    email: data.email || RESTAURANTS.find((ir) => ir.id === data.id)?.email || '',
+    acceptsCard: localMeta.acceptsCard ?? data.accepts_card ?? false,
+    featured: false,
+    pin: localMeta.pin || data.pin || '1234',
+    email: localMeta.email || data.email || seed?.email || `${data.slug || data.id}@dondomi.com`,
+    accountStatus: localMeta.accountStatus || data.account_status || 'ACTIVE',
+    nequiNumber: localMeta.nequiNumber || data.nequi_number || cleanPhone,
+    daviplataNumber: localMeta.daviplataNumber || data.daviplata_number || cleanPhone,
+    brebKey: localMeta.brebKey || data.breb_key || `@${(data.slug || 'comercio').replace(/[^a-z0-9]/gi, '')}`,
   };
 }
 
@@ -79,7 +122,7 @@ export function productToDb(p: Product) {
     is_available: p.isAvailable,
     is_popular: p.isPopular || false,
     preparation_time_min: p.preparationTimeMin || 20,
-    options: p.options || null,
+    options: p.options && p.options.length > 0 ? p.options : null,
   };
 }
 
@@ -147,8 +190,10 @@ export function dbToDriver(data: any): Driver {
     plate: data.plate,
     vehicleType: (data.vehicle_type as 'MOTO' | 'BICICLETA') || 'MOTO',
     isActive: data.is_active ?? true,
+    isAvailable: data.is_available ?? true,
     rating: Number(data.rating) || 5.0,
     totalDeliveries: Number(data.total_deliveries) || 0,
+    pin: data.pin || '1234',
     createdAt: data.created_at || new Date().toISOString(),
   };
 }

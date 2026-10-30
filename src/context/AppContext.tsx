@@ -27,13 +27,16 @@ export const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   CANCELLED: [], // Terminal
 };
 
-// Parser seguro de notas de cancelación e incidencias
+// Parser seguro de notas de cancelación, incidencias, flota y calificaciones
 export function parseOrderNotes(notes?: string) {
   if (!notes) return {};
   const res: {
     cancellationReason?: string;
     cancelledBy?: 'CLIENTE' | 'RESTAURANTE' | 'SISTEMA' | 'ADMINISTRADOR';
     incidentReason?: string;
+    deliveryFleet?: 'DONDOMI' | 'PROPIO';
+    rating?: number;
+    reviewComment?: string;
   } = {};
   const cancelMatch = notes.match(
     /\[Cancelado por (CLIENTE|RESTAURANTE|SISTEMA|ADMINISTRADOR):\s*([^\]]+)\]/i
@@ -47,6 +50,15 @@ export function parseOrderNotes(notes?: string) {
   }
   const incMatch = notes.match(/\[Incidencia Repartidor:\s*([^\]]+)\]/i);
   if (incMatch) res.incidentReason = incMatch[1].trim();
+
+  const fleetMatch = notes.match(/\[Flota:\s*(DONDOMI|PROPIO)\]/i);
+  if (fleetMatch) res.deliveryFleet = fleetMatch[1].toUpperCase() as 'DONDOMI' | 'PROPIO';
+
+  const ratingMatch = notes.match(/\[Calificación:\s*(\d)(?:★)?(?:\s*-\s*([^\]]+))?\]/i);
+  if (ratingMatch) {
+    res.rating = Number(ratingMatch[1]) || 5;
+    if (ratingMatch[2]) res.reviewComment = ratingMatch[2].trim();
+  }
   return res;
 }
 
@@ -109,7 +121,9 @@ interface AppContextType {
   // Flota de Domiciliarios
   drivers: Driver[];
   addDriver: (driver: Driver) => void;
+  updateDriver: (driver: Driver) => void;
   toggleDriverStatus: (driverId: string) => void;
+  toggleDriverAvailability: (driverId: string) => void;
 
   // Restaurantes en la nube (Supabase)
   restaurants: Restaurant[];
@@ -140,6 +154,12 @@ interface AppContextType {
     driverName: string,
     driverPhone?: string
   ) => Promise<{ success: boolean; error?: string }>;
+  confirmOrderPickup: (orderId: string) => Promise<boolean>;
+  dispatchWithOwnDriver: (orderId: string) => Promise<boolean>;
+  assignDriverByAdmin: (orderId: string, driver: Driver | null) => Promise<boolean>;
+  confirmOrderPayment: (orderId: string) => Promise<boolean>;
+  rateOrder: (orderId: string, rating: number, comment?: string) => Promise<boolean>;
+  reorderItems: (order: Order) => void;
   unclaimOrder: (orderId: string, incidentReason: string) => Promise<boolean>;
 }
 
@@ -293,11 +313,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     dataService.saveDriver(driver);
   };
 
+  const updateDriver = (driver: Driver) => {
+    setDrivers((prev) => prev.map((d) => (d.id === driver.id ? driver : d)));
+    dataService.saveDriver(driver);
+  };
+
   const toggleDriverStatus = (driverId: string) => {
     const target = drivers.find((d) => d.id === driverId);
     const currentActive = target ? target.isActive : true;
     setDrivers((prev) => prev.map((d) => (d.id === driverId ? { ...d, isActive: !d.isActive } : d)));
     dataService.toggleDriverActive(driverId, currentActive);
+  };
+
+  const toggleDriverAvailability = (driverId: string) => {
+    setDrivers((prev) =>
+      prev.map((d) => {
+        if (d.id === driverId) {
+          const updated = { ...d, isAvailable: d.isAvailable === false ? true : false };
+          dataService.saveDriver(updated);
+          return updated;
+        }
+        return d;
+      })
+    );
   };
 
   // Autenticación Real de la Plataforma
@@ -439,6 +477,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               cancellationReason: parsed.cancellationReason,
               cancelledBy: parsed.cancelledBy,
               incidentReason: parsed.incidentReason,
+              deliveryFleet: parsed.deliveryFleet,
+              rating: parsed.rating,
+              reviewComment: parsed.reviewComment,
             };
             setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== newOrder.id)]);
           } else if (payload.eventType === 'UPDATE') {
@@ -457,6 +498,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                       cancellationReason: parsed.cancellationReason || o.cancellationReason,
                       cancelledBy: parsed.cancelledBy || o.cancelledBy,
                       incidentReason: parsed.incidentReason || o.incidentReason,
+                      deliveryFleet: parsed.deliveryFleet || o.deliveryFleet,
+                      rating: parsed.rating || o.rating,
+                      reviewComment: parsed.reviewComment || o.reviewComment,
                     }
                   : o
               )
@@ -832,12 +876,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updatedNotes = current.customerNotes ? `${current.customerNotes} | [${tag}]` : `[${tag}]`;
     }
 
+    const nextPaymentStatus =
+      newStatus === 'DELIVERED'
+        ? 'COMPLETED'
+        : newStatus === 'CANCELLED' && current.paymentStatus === 'COMPLETED'
+        ? 'REFUNDED'
+        : current.paymentStatus;
+
     setOrders((prev) =>
       prev.map((o) =>
         o.id === orderId
           ? {
               ...o,
               status: newStatus,
+              paymentStatus: nextPaymentStatus,
               cancellationReason: reason || o.cancellationReason,
               cancelledBy: cancelledBy || o.cancelledBy,
               customerNotes: updatedNotes,
@@ -847,7 +899,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
 
     try {
-      const payload: any = { status: newStatus };
+      const payload: any = { status: newStatus, payment_status: nextPaymentStatus };
       if (updatedNotes !== current.customerNotes) {
         payload.customer_notes = updatedNotes;
       }
@@ -880,6 +932,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Asignar pedido al domiciliario con prevención de reclamación simultánea (atomic lock)
+  // El pedido conserva su estado (PREPARING o READY_FOR_PICKUP) hasta que el domiciliario confirme recogida en el local.
   const claimOrder = async (
     orderId: string,
     driverName: string,
@@ -888,12 +941,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const target = orders.find((o) => o.id === orderId);
     if (!target) return { success: false, error: 'Pedido no encontrado' };
 
-    if (
-      target.status !== 'READY_FOR_PICKUP' &&
-      target.status !== 'PREPARING' &&
-      target.status !== 'PENDING'
-    ) {
-      return { success: false, error: 'Este pedido ya no está disponible para ser tomado.' };
+    if (target.status !== 'READY_FOR_PICKUP' && target.status !== 'PREPARING') {
+      return {
+        success: false,
+        error: 'Este pedido aún no ha sido aceptado por la cocina o ya no está disponible.',
+      };
     }
     if (target.driverId) {
       return { success: false, error: 'Esta carrera ya fue tomada por otro domiciliario.' };
@@ -901,12 +953,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const driverId = currentUser?.id || `drv-${Date.now()}`;
 
+    // Verificar que este domiciliario no lleve ya otra carrera activa sin entregar
+    const existingActive = orders.find(
+      (o) =>
+        o.id !== orderId &&
+        (o.driverId === driverId || o.driverName === driverName) &&
+        (o.status === 'ON_THE_WAY' || o.status === 'READY_FOR_PICKUP' || o.status === 'PREPARING')
+    );
+    if (existingActive) {
+      return {
+        success: false,
+        error: `Ya tienes la carrera activa #${existingActive.orderNumber}. Finalízala o libérala antes de tomar otra.`,
+      };
+    }
+
     // Operación atómica condicional: sólo actualiza si driver_id es NULL en base de datos
     try {
       const { data, error } = await supabase
         .from('orders')
         .update({
-          status: 'ON_THE_WAY',
           driver_id: driverId,
           driver_name: driverName,
         })
@@ -931,9 +996,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         o.id === orderId
           ? {
               ...o,
-              status: 'ON_THE_WAY',
               driverId,
               driverName,
+              deliveryFleet: 'DONDOMI',
             }
           : o
       )
@@ -942,20 +1007,201 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true };
   };
 
-  // Liberar carrera por parte del domiciliario ante una incidencia en ruta
-  const unclaimOrder = async (orderId: string, incidentReason: string): Promise<boolean> => {
+  // Confirmar que el domiciliario recogió el pedido en el restaurante e inicia ruta al cliente (ON_THE_WAY)
+  const confirmOrderPickup = async (orderId: string): Promise<boolean> => {
     const target = orders.find((o) => o.id === orderId);
-    if (!target || target.status !== 'ON_THE_WAY') return false;
+    if (!target) return false;
 
-    const noteTag = `[Incidencia Repartidor: ${incidentReason} (${target.driverName || 'repartidor'})]`;
-    const updatedNotes = target.customerNotes ? `${target.customerNotes} | ${noteTag}` : noteTag;
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, status: 'ON_THE_WAY' } : o))
+    );
+
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: 'ON_THE_WAY' })
+        .eq('id', orderId);
+      return !error;
+    } catch {
+      return false;
+    }
+  };
+
+  // Despachar pedido con domiciliario propio del restaurante
+  const dispatchWithOwnDriver = async (orderId: string): Promise<boolean> => {
+    const target = orders.find((o) => o.id === orderId);
+    if (!target) return false;
+
+    const cleanBaseNotes = (target.customerNotes || '').replace(/\s*\|?\s*\[Flota:\s*\w+\]/gi, '').trim();
+    const updatedNotes = cleanBaseNotes ? `${cleanBaseNotes} | [Flota: PROPIO]` : `[Flota: PROPIO]`;
 
     setOrders((prev) =>
       prev.map((o) =>
         o.id === orderId
           ? {
               ...o,
-              status: 'READY_FOR_PICKUP',
+              status: 'ON_THE_WAY',
+              driverId: 'propio',
+              driverName: 'Domiciliario Propio',
+              deliveryFleet: 'PROPIO',
+              customerNotes: updatedNotes,
+            }
+          : o
+      )
+    );
+
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          status: 'ON_THE_WAY',
+          driver_id: 'propio',
+          driver_name: 'Domiciliario Propio',
+          customer_notes: updatedNotes,
+        })
+        .eq('id', orderId);
+      return !error;
+    } catch {
+      return false;
+    }
+  };
+
+  // Asignar o reasignar domiciliario manualmente desde la Torre de Control (/admin)
+  const assignDriverByAdmin = async (orderId: string, driver: Driver | null): Promise<boolean> => {
+    const target = orders.find((o) => o.id === orderId);
+    if (!target) return false;
+
+    const nextDriverId = driver ? driver.id : undefined;
+    const nextDriverName = driver ? driver.name : undefined;
+
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              driverId: nextDriverId,
+              driverName: nextDriverName,
+              deliveryFleet: driver ? 'DONDOMI' : undefined,
+            }
+          : o
+      )
+    );
+
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          driver_id: driver ? driver.id : null,
+          driver_name: driver ? driver.name : null,
+        })
+        .eq('id', orderId);
+      return !error;
+    } catch {
+      return false;
+    }
+  };
+
+  // Confirmar verificación de pago por transferencia digital
+  const confirmOrderPayment = async (orderId: string): Promise<boolean> => {
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, paymentStatus: 'COMPLETED' } : o))
+    );
+
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ payment_status: 'COMPLETED' })
+        .eq('id', orderId);
+      return !error;
+    } catch {
+      return false;
+    }
+  };
+
+  // Calificar pedido entregado (1 a 5 estrellas + comentario opcional)
+  const rateOrder = async (orderId: string, rating: number, comment?: string): Promise<boolean> => {
+    const target = orders.find((o) => o.id === orderId);
+    if (!target) return false;
+
+    const safeRating = Math.max(1, Math.min(5, Math.round(rating)));
+    const cleanBaseNotes = (target.customerNotes || '')
+      .replace(/\s*\|?\s*\[Calificación:[^\]]+\]/gi, '')
+      .trim();
+    const tag = comment?.trim()
+      ? `[Calificación: ${safeRating}★ - ${comment.trim().replace(/[\[\]]/g, '')}]`
+      : `[Calificación: ${safeRating}★]`;
+    const updatedNotes = cleanBaseNotes ? `${cleanBaseNotes} | ${tag}` : tag;
+
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              rating: safeRating,
+              reviewComment: comment?.trim() || undefined,
+              customerNotes: updatedNotes,
+            }
+          : o
+      )
+    );
+
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ customer_notes: updatedNotes })
+        .eq('id', orderId);
+      return !error;
+    } catch {
+      return false;
+    }
+  };
+
+  // Volver a pedir: carga en la canasta los platos de una orden previa
+  const reorderItems = (order: Order) => {
+    const restProducts = productsByRestaurant[order.restaurantId] || [];
+    const newCartItems: CartItem[] = order.items.map((it, idx) => {
+      const foundProd = restProducts.find((p) => p.id === it.productId || p.name === it.productName);
+      const productObj: Product = foundProd || {
+        id: it.productId || `re-prod-${idx}`,
+        restaurantId: order.restaurantId,
+        categoryName: 'Menú',
+        name: it.productName,
+        description: '',
+        price: it.unitPrice,
+        isAvailable: true,
+      };
+      return {
+        id: `${productObj.id}-${Date.now()}-${idx}`,
+        product: productObj,
+        quantity: it.quantity,
+        selectedOptions: it.selectedOptions,
+        notes: it.notes,
+        itemTotal: it.subtotal,
+      };
+    });
+
+    setCartRestaurantId(order.restaurantId);
+    setCartRestaurantName(order.restaurantName);
+    setCart(newCartItems);
+    saveCartToStorage(newCartItems, order.restaurantId, order.restaurantName);
+  };
+
+  // Liberar carrera por parte del domiciliario ante una incidencia en ruta o antes de recoger
+  const unclaimOrder = async (orderId: string, incidentReason: string): Promise<boolean> => {
+    const target = orders.find((o) => o.id === orderId);
+    if (!target || !target.driverId) return false;
+
+    const noteTag = `[Incidencia Repartidor: ${incidentReason} (${target.driverName || 'repartidor'})]`;
+    const updatedNotes = target.customerNotes ? `${target.customerNotes} | ${noteTag}` : noteTag;
+    const nextStatus: OrderStatus =
+      target.status === 'PREPARING' ? 'PREPARING' : 'READY_FOR_PICKUP';
+
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: nextStatus,
               driverId: undefined,
               driverName: undefined,
               customerNotes: updatedNotes,
@@ -969,7 +1215,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await supabase
         .from('orders')
         .update({
-          status: 'READY_FOR_PICKUP',
+          status: nextStatus,
           driver_id: null,
           driver_name: null,
           customer_notes: updatedNotes,
@@ -1062,6 +1308,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
 
     if (foundRest) {
+      if (foundRest.accountStatus === 'ARCHIVED') {
+        return { success: false, error: 'La cuenta de este restaurante ha sido archivada por la administración.' };
+      }
       const expectedPin = foundRest.pin || '1234';
       if (cleanPass !== 'cocina1234' && cleanPass !== expectedPin && cleanPass !== '1234') {
         return { success: false, error: 'Contraseña de restaurante incorrecta.' };
@@ -1096,7 +1345,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
 
     if (foundDriver) {
-      if (cleanPass !== 'domi1234' && cleanPass !== '1234') {
+      if (!foundDriver.isActive) {
+        return { success: false, error: 'Tu cuenta de domiciliario se encuentra suspendida temporalmente.' };
+      }
+      const expectedDriverPin = foundDriver.pin || 'domi1234';
+      if (cleanPass !== 'domi1234' && cleanPass !== expectedDriverPin && cleanPass !== '1234') {
         return { success: false, error: 'Contraseña de domiciliario incorrecta.' };
       }
       const user: User = {
@@ -1368,7 +1621,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setGlobalAnnouncement,
         drivers,
         addDriver,
+        updateDriver,
         toggleDriverStatus,
+        toggleDriverAvailability,
         productsByRestaurant,
         addProduct,
         updateProduct,
@@ -1381,6 +1636,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         loginAsDriver,
         logout,
         claimOrder,
+        confirmOrderPickup,
+        dispatchWithOwnDriver,
+        assignDriverByAdmin,
+        confirmOrderPayment,
+        rateOrder,
+        reorderItems,
         unclaimOrder,
         orders,
         addOrder,
