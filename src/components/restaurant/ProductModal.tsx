@@ -21,48 +21,90 @@ export default function ProductModal({
 }: ProductModalProps) {
   const { addToCart } = useApp();
   const [quantity, setQuantity] = useState<number>(1);
-  const [selectedRadioOptions, setSelectedRadioOptions] = useState<Record<string, ProductOptionItem>>({});
-  const [selectedCheckboxOptions, setSelectedCheckboxOptions] = useState<Record<string, boolean>>({});
+  const [selectedByGroup, setSelectedByGroup] = useState<Record<string, ProductOptionItem[]>>({});
   const [notes, setNotes] = useState<string>('');
   const [modalError, setModalError] = useState<string | null>(null);
 
   if (!product) return null;
 
-  // Calcular precio total incluyendo opciones seleccionadas
+  // Calcular precio total incluyendo todas las opciones seleccionadas
   let additionalOptionsPrice = 0;
-  Object.values(selectedRadioOptions).forEach((opt) => {
-    additionalOptionsPrice += opt.additionalPrice;
-  });
-
-  if (product.options) {
-    product.options.forEach((group) => {
-      if (!group.required) {
-        group.items.forEach((item) => {
-          if (selectedCheckboxOptions[item.id]) {
-            additionalOptionsPrice += item.additionalPrice;
-          }
-        });
-      }
+  Object.values(selectedByGroup).forEach((items) => {
+    items.forEach((opt) => {
+      additionalOptionsPrice += opt.additionalPrice;
     });
-  }
+  });
 
   const unitTotal = product.price + additionalOptionsPrice;
   const grandTotal = unitTotal * quantity;
   const isAvailable = product.isAvailable !== false;
   const canAdd = isAvailable && isRestaurantOpen;
 
+  const handleToggleOption = (
+    groupId: string,
+    groupName: string,
+    item: ProductOptionItem,
+    minSelect: number,
+    maxSelect: number
+  ) => {
+    setModalError(null);
+    setSelectedByGroup((prev) => {
+      const current = prev[groupId] || [];
+      const exists = current.some((i) => i.id === item.id);
+
+      if (maxSelect === 1) {
+        if (exists && minSelect === 0) {
+          return { ...prev, [groupId]: [] };
+        }
+        return { ...prev, [groupId]: [item] };
+      }
+
+      if (exists) {
+        return {
+          ...prev,
+          [groupId]: current.filter((i) => i.id !== item.id),
+        };
+      }
+
+      if (current.length >= maxSelect) {
+        setModalError(
+          `Máximo ${maxSelect} ${maxSelect === 1 ? 'opción permitida' : 'opciones permitidas'} en "${groupName}".`
+        );
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [groupId]: [...current, item],
+      };
+    });
+  };
+
   const handleAdd = () => {
     setModalError(null);
     if (!canAdd) {
-      setModalError(!isAvailable ? 'Este plato está agotado por hoy en cocina.' : 'El restaurante se encuentra cerrado en este momento.');
+      setModalError(
+        !isAvailable
+          ? 'Este plato está agotado por hoy en cocina.'
+          : 'El restaurante se encuentra cerrado en este momento.'
+      );
       return;
     }
 
-    // Validar requeridos
+    // Validar mínimos y máximos requeridos por cada grupo
     if (product.options) {
       for (const group of product.options) {
-        if (group.required && !selectedRadioOptions[group.id]) {
-          setModalError(`Por favor selecciona una opción en "${group.name}".`);
+        const minReq = group.required
+          ? Math.max(1, group.minSelect || 1)
+          : Math.max(0, group.minSelect || 0);
+        const selectedList = selectedByGroup[group.id] || [];
+
+        if (selectedList.length < minReq) {
+          setModalError(
+            minReq === 1
+              ? `Por favor selecciona al menos 1 opción en "${group.name}".`
+              : `Por favor selecciona al menos ${minReq} opciones en "${group.name}" (seleccionaste ${selectedList.length} de ${minReq}).`
+          );
           return;
         }
       }
@@ -70,30 +112,16 @@ export default function ProductModal({
 
     const selectedOptionsList: SelectedOption[] = [];
 
-    // Opciones de radio
-    Object.entries(selectedRadioOptions).forEach(([groupId, item]) => {
-      const group = product.options?.find((g) => g.id === groupId);
-      selectedOptionsList.push({
-        groupName: group?.name || 'Opción',
-        itemName: item.name,
-        price: item.additionalPrice,
-      });
-    });
-
-    // Opciones de checkbox
     if (product.options) {
       product.options.forEach((group) => {
-        if (!group.required) {
-          group.items.forEach((item) => {
-            if (selectedCheckboxOptions[item.id]) {
-              selectedOptionsList.push({
-                groupName: group.name,
-                itemName: item.name,
-                price: item.additionalPrice,
-              });
-            }
+        const chosen = selectedByGroup[group.id] || [];
+        chosen.forEach((item) => {
+          selectedOptionsList.push({
+            groupName: group.name,
+            itemName: item.name,
+            price: item.additionalPrice,
           });
-        }
+        });
       });
     }
 
@@ -150,78 +178,99 @@ export default function ProductModal({
         <div className="p-5 overflow-y-auto space-y-5 flex-1">
 
           {/* Option Groups (if any) */}
-          {product.options && product.options.map((group) => (
-            <div key={group.id} className="pt-3 border-t border-slate-100 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900">{group.name}</h4>
-                  <p className="text-[11px] text-slate-500">
-                    {group.required ? 'Obligatorio · Selecciona 1' : 'Opcional'}
-                  </p>
-                </div>
-                {group.required && (
-                  <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    Obligatorio
-                  </span>
-                )}
-              </div>
+          {product.options &&
+            product.options.map((group) => {
+              const minReq = group.required
+                ? Math.max(1, group.minSelect || 1)
+                : Math.max(0, group.minSelect || 0);
+              const maxAllowed = Math.max(
+                minReq,
+                group.maxSelect || (group.required ? 1 : group.items.length)
+              );
+              const selectedList = selectedByGroup[group.id] || [];
+              const isGroupRequired = minReq > 0;
 
-              <div className="space-y-2">
-                {group.items.map((item) => {
-                  const isChecked = group.required
-                    ? selectedRadioOptions[group.id]?.id === item.id
-                    : !!selectedCheckboxOptions[item.id];
+              const ruleSubtitle = isGroupRequired
+                ? minReq === maxAllowed
+                  ? `Obligatorio · Selecciona ${minReq}`
+                  : `Obligatorio · Selecciona de ${minReq} a ${maxAllowed}`
+                : maxAllowed === 1
+                ? 'Opcional · Máximo 1 opción'
+                : `Opcional · Hasta ${maxAllowed} opciones`;
 
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => {
-                        if (group.required) {
-                          setSelectedRadioOptions((prev) => ({
-                            ...prev,
-                            [group.id]: item,
-                          }));
-                        } else {
-                          setSelectedCheckboxOptions((prev) => ({
-                            ...prev,
-                            [item.id]: !prev[item.id],
-                          }));
-                        }
-                      }}
-                      className={`w-full text-left p-3 rounded-2xl border transition flex items-center justify-between ${
-                        isChecked
-                          ? 'border-orange-500 bg-orange-50/50'
-                          : 'border-slate-200 hover:border-slate-300 bg-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-5 h-5 rounded-full flex items-center justify-center border transition ${
+              return (
+                <div key={group.id} className="pt-3 border-t border-slate-100 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">{group.name}</h4>
+                      <p className="text-[11px] text-slate-500">{ruleSubtitle}</p>
+                    </div>
+                    {isGroupRequired ? (
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap ${
+                          selectedList.length >= minReq
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-orange-100 text-orange-700'
+                        }`}
+                      >
+                        {selectedList.length >= minReq
+                          ? `✓ Listo (${selectedList.length}/${maxAllowed})`
+                          : `Obligatorio (${selectedList.length}/${minReq})`}
+                      </span>
+                    ) : (
+                      selectedList.length > 0 && (
+                        <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                          {selectedList.length}/{maxAllowed}
+                        </span>
+                      )
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    {group.items.map((item) => {
+                      const isChecked = selectedList.some((i) => i.id === item.id);
+
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() =>
+                            handleToggleOption(group.id, group.name, item, minReq, maxAllowed)
+                          }
+                          className={`w-full text-left p-3 rounded-2xl border transition flex items-center justify-between cursor-pointer ${
                             isChecked
-                              ? 'border-orange-600 bg-orange-600 text-white'
-                              : 'border-slate-300'
+                              ? 'border-orange-500 bg-orange-50/50'
+                              : 'border-slate-200 hover:border-slate-300 bg-white'
                           }`}
                         >
-                          {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
-                        </div>
-                        <span className="text-xs font-semibold text-slate-800">
-                          {item.name}
-                        </span>
-                      </div>
-                      {item.additionalPrice > 0 ? (
-                        <span className="text-xs font-bold text-orange-600">
-                          +{formatCOP(item.additionalPrice)}
-                        </span>
-                      ) : (
-                        <span className="text-xs font-medium text-slate-400">Incluido</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-5 h-5 rounded-full flex items-center justify-center border transition ${
+                                isChecked
+                                  ? 'border-orange-600 bg-orange-600 text-white'
+                                  : 'border-slate-300'
+                              }`}
+                            >
+                              {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                            <span className="text-xs font-semibold text-slate-800">
+                              {item.name}
+                            </span>
+                          </div>
+                          {item.additionalPrice > 0 ? (
+                            <span className="text-xs font-bold text-orange-600">
+                              +{formatCOP(item.additionalPrice)}
+                            </span>
+                          ) : (
+                            <span className="text-xs font-medium text-slate-400">Incluido</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
 
           {/* Notes textarea */}
           <div className="pt-3 border-t border-slate-100 space-y-1.5">

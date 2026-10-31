@@ -1296,13 +1296,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       'carlos@dondomi.com': 'drv-2',
     };
 
-    // 2. Detección Restaurante (por alias directo, por email registrado o por nombre/slug)
-    const targetRestId = RESTAURANT_ALIASES[cleanEmail];
+    // 2. Detección Restaurante (por alias, correo, código/ID, slug, nombre o teléfono)
+    const normalizedIdentity = cleanEmail.replace(/[\s\W]+/g, '');
+    const cleanIdentityDigits = cleanEmail.replace(/\D/g, '');
+    const targetRestId =
+      RESTAURANT_ALIASES[cleanEmail] || RESTAURANT_ALIASES[`${cleanEmail}@dondomi.com`];
     const foundRest = targetRestId
       ? restaurants.find((r) => r.id === targetRestId) || INITIAL_RESTAURANTS.find((r) => r.id === targetRestId)
       : restaurants.find(
           (r) =>
+            r.id.toLowerCase() === cleanEmail ||
+            r.slug.toLowerCase() === cleanEmail ||
+            r.slug.toLowerCase().replace(/[\s\W]+/g, '') === normalizedIdentity ||
+            r.name.toLowerCase() === cleanEmail ||
+            r.name.toLowerCase().replace(/[\s\W]+/g, '') === normalizedIdentity ||
             (r.email && r.email.toLowerCase() === cleanEmail) ||
+            (cleanIdentityDigits.length === 10 && r.phone.replace(/\D/g, '') === cleanIdentityDigits) ||
             r.name.toLowerCase().replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail ||
             r.slug.replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail
         );

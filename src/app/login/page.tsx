@@ -10,9 +10,6 @@ import {
   LogIn,
   AlertCircle,
   CheckCircle2,
-  Sparkles,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 
@@ -24,7 +21,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [showDemoHelpers, setShowDemoHelpers] = useState<boolean>(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,38 +41,6 @@ export default function LoginPage() {
         }
       } else {
         setErrorMessage(res.error || 'Credenciales inválidas. Verifica tu correo y contraseña.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleQuickFill = (demoEmail: string, demoPass: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    setErrorMessage(null);
-  };
-
-  const handleDirectDemoLogin = async (demoEmail: string, demoPass: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    setErrorMessage(null);
-    setIsLoading(true);
-
-    try {
-      const res = await loginWithEmail(demoEmail, demoPass);
-      if (res.success) {
-        if (res.role === 'ADMINISTRADOR') {
-          router.push('/admin');
-        } else if (res.role === 'RESTAURANTE') {
-          router.push('/merchant');
-        } else if (res.role === 'DOMICILIARIO') {
-          router.push('/driver');
-        } else {
-          router.push('/');
-        }
-      } else {
-        setErrorMessage(res.error || 'Credenciales inválidas.');
       }
     } finally {
       setIsLoading(false);
@@ -196,85 +160,12 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-orange-500/25 transition transform active:scale-98 disabled:opacity-50 text-sm flex items-center justify-center gap-2 mt-2"
+              className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-orange-500/25 transition transform active:scale-98 disabled:opacity-50 text-sm flex items-center justify-center gap-2 mt-2 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
               <span>{isLoading ? 'Verificando...' : 'Iniciar Sesión'}</span>
             </button>
           </form>
-
-          {/* Desplegable de Cuentas de Demostración Rápida */}
-          <div className="pt-2 border-t border-slate-700/60">
-            <button
-              type="button"
-              onClick={() => setShowDemoHelpers(!showDemoHelpers)}
-              className="w-full flex items-center justify-between text-[11px] font-bold text-slate-400 hover:text-slate-200 py-1 transition"
-            >
-              <span className="flex items-center gap-1.5 text-orange-400">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Cuentas de prueba rápida (1 clic)</span>
-              </span>
-              {showDemoHelpers ? (
-                <ChevronUp className="w-3.5 h-3.5 text-slate-500" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
-              )}
-            </button>
-
-            {showDemoHelpers && (
-              <div className="mt-2.5 p-3 bg-slate-900/90 rounded-2xl border border-slate-700/80 space-y-2 animate-in fade-in duration-200 text-xs">
-                <p className="text-[10px] text-slate-400">
-                  Toca un rol para rellenar los datos de prueba automáticamente:
-                </p>
-
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    disabled={isLoading}
-                    onClick={() => handleDirectDemoLogin('admin@dondomi.com', 'admin2026')}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer disabled:opacity-50"
-                  >
-                    <span className="text-[10px] font-bold text-orange-400 block">🛡️ Administrador</span>
-                    <span className="text-[11px] text-white font-mono block">admin@dondomi.com</span>
-                    <span className="text-[9px] text-slate-400 mt-0.5 block">Entrar con 1 clic →</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isLoading}
-                    onClick={() => handleDirectDemoLogin('elvalle@dondomi.com', 'cocina1234')}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer disabled:opacity-50"
-                  >
-                    <span className="text-[10px] font-bold text-amber-400 block">🍳 Pollos El Valle</span>
-                    <span className="text-[11px] text-white font-mono block">elvalle@dondomi.com</span>
-                    <span className="text-[9px] text-slate-400 mt-0.5 block">Entrar con 1 clic →</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isLoading}
-                    onClick={() => handleDirectDemoLogin('pedro@dondomi.com', 'cocina1234')}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer disabled:opacity-50"
-                  >
-                    <span className="text-[10px] font-bold text-amber-400 block">🍳 Asador de Pedro</span>
-                    <span className="text-[11px] text-white font-mono block">pedro@dondomi.com</span>
-                    <span className="text-[9px] text-slate-400 mt-0.5 block">Entrar con 1 clic →</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isLoading}
-                    onClick={() => handleDirectDemoLogin('javier@dondomi.com', 'domi1234')}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition cursor-pointer disabled:opacity-50"
-                  >
-                    <span className="text-[10px] font-bold text-blue-400 block">🛵 Domiciliario</span>
-                    <span className="text-[11px] text-white font-mono block">javier@dondomi.com</span>
-                    <span className="text-[9px] text-slate-400 mt-0.5 block">Entrar con 1 clic →</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
       </main>
 

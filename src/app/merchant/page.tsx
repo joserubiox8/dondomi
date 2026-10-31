@@ -8,9 +8,7 @@ import {
   CheckCircle2,
   ArrowLeft,
   PackageCheck,
-  Eye,
   Printer,
-  Volume2,
   X,
   AlertCircle,
   MapPin,
@@ -29,6 +27,7 @@ import {
   Wallet,
   Sliders,
   Star,
+  FolderPlus,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
@@ -66,15 +65,12 @@ export default function MerchantPage() {
     toggleRestaurantStatus,
     currentUser,
     loginWithEmail,
-    loginAsRestaurant,
     logout,
   } = useApp();
 
-  // Estado para control de acceso interno en /merchant
-  const [loginRestId, setLoginRestId] = useState<string>('');
+  // Estado para autenticación individual de tienda en modo producción
+  const [loginIdentifier, setLoginIdentifier] = useState<string>('');
   const [loginPin, setLoginPin] = useState<string>('');
-  const [loginEmail, setLoginEmail] = useState<string>('');
-  const [loginMode, setLoginMode] = useState<'PIN' | 'EMAIL'>('PIN');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
 
@@ -85,17 +81,11 @@ export default function MerchantPage() {
     setLoginError(null);
     setIsLoggingIn(true);
     try {
-      if (loginMode === 'EMAIL') {
-        const res = await loginWithEmail(loginEmail, loginPin);
-        if (!res.success || res.role !== 'RESTAURANTE') {
-          setLoginError(res.error || 'Credenciales de restaurante inválidas.');
-        }
-      } else {
-        const targetId = loginRestId || restaurants[0]?.id || 'rest-1';
-        const res = await loginAsRestaurant(targetId, loginPin);
-        if (!res.success) {
-          setLoginError(res.error || 'PIN de cocina incorrecto.');
-        }
+      const res = await loginWithEmail(loginIdentifier, loginPin);
+      if (!res.success || res.role !== 'RESTAURANTE') {
+        setLoginError(
+          res.error || 'Identificador de tienda o PIN/contraseña inválidos.'
+        );
       }
     } finally {
       setIsLoggingIn(false);
@@ -105,7 +95,7 @@ export default function MerchantPage() {
   const [activeTab, setActiveTab] = useState<MerchantTab>('KDS');
   const [kdsFilter, setKdsFilter] = useState<KdsFilter>('ACTIVOS');
   const [kdsSearch, setKdsSearch] = useState<string>('');
-  const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
+  const [audioEnabled] = useState<boolean>(true);
   const prevPendingCountRef = useRef<number>(0);
 
   // Modal para ticket térmico de comanda o cierre de caja
@@ -118,9 +108,13 @@ export default function MerchantPage() {
   const [customRejectReason, setCustomRejectReason] = useState<string>('');
   const [isSubmittingReject, setIsSubmittingReject] = useState<boolean>(false);
 
-  // Filtros en Mi Carta
+  // Filtros y gestión centralizada de categorías en Mi Carta
   const [menuCategoryFilter, setMenuCategoryFilter] = useState<string>('TODAS');
   const [menuSearch, setMenuSearch] = useState<string>('');
+  const [customMenuCategories, setCustomMenuCategories] = useState<string[]>([]);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState<boolean>(false);
+  const [newCategoryName, setNewCategoryName] = useState<string>('');
+  const [categoryModalError, setCategoryModalError] = useState<string | null>(null);
 
   // Modales de plato (Crear / Editar con Opciones/Adiciones)
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -247,7 +241,81 @@ export default function MerchantPage() {
   }, [restaurant]);
 
   const products = productsByRestaurant[restaurant.id] || [];
-  const menuCategories = Array.from(new Set(products.map((p) => p.categoryName).filter(Boolean)));
+
+  // Cargar categorías personalizadas de la carta de este restaurante desde localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined' || !restaurant.id) return;
+    try {
+      const saved = localStorage.getItem(`dondomi_merchant_categories_${restaurant.id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setCustomMenuCategories(parsed.filter(Boolean));
+          return;
+        }
+      }
+    } catch {}
+    setCustomMenuCategories([]);
+  }, [restaurant.id]);
+
+  const saveCustomMenuCategories = (nextList: string[]) => {
+    setCustomMenuCategories(nextList);
+    if (typeof window !== 'undefined' && restaurant.id) {
+      try {
+        localStorage.setItem(
+          `dondomi_merchant_categories_${restaurant.id}`,
+          JSON.stringify(nextList)
+        );
+      } catch {}
+    }
+  };
+
+  // Unificar categorías creadas centralizadamente + categorías de platos existentes
+  const productCategories = Array.from(
+    new Set(products.map((p) => p.categoryName).filter(Boolean))
+  );
+  const combinedCategories = Array.from(
+    new Set([...customMenuCategories, ...productCategories])
+  );
+  const menuCategories =
+    combinedCategories.length > 0
+      ? combinedCategories
+      : ['Platos Fuertes', 'Combos', 'Entradas', 'Bebidas', 'Adicionales'];
+
+  const handleAddMenuCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCategoryModalError(null);
+    const clean = newCategoryName.trim();
+    if (!clean) {
+      setCategoryModalError('Escribe un nombre válido para la categoría.');
+      return;
+    }
+    if (menuCategories.some((c) => c.toLowerCase() === clean.toLowerCase())) {
+      setCategoryModalError('Esta categoría ya existe en tu carta.');
+      return;
+    }
+    const updated = [...customMenuCategories, clean];
+    saveCustomMenuCategories(updated);
+    setProdCategory(clean);
+    setNewCategoryName('');
+    showNotice(`✅ Categoría "${clean}" agregada a tu carta`);
+  };
+
+  const handleRemoveMenuCategory = (catName: string) => {
+    const usedCount = products.filter((p) => p.categoryName === catName).length;
+    if (usedCount > 0) {
+      setCategoryModalError(
+        `No puedes eliminar "${catName}" porque tiene ${usedCount} plato(s) asignado(s).`
+      );
+      return;
+    }
+    const updated = customMenuCategories.filter((c) => c !== catName);
+    saveCustomMenuCategories(updated);
+    if (menuCategoryFilter === catName) {
+      setMenuCategoryFilter('TODAS');
+    }
+    showNotice(`🗑️ Categoría "${catName}" eliminada`);
+  };
 
   const filteredMenuProducts = products.filter((p) => {
     const matchesCat = menuCategoryFilter === 'TODAS' || p.categoryName === menuCategoryFilter;
@@ -308,12 +376,6 @@ export default function MerchantPage() {
     }
     prevPendingCountRef.current = currentPendingCount;
   }, [pendingOrders.length, audioEnabled]);
-
-  const handleTestAudio = () => {
-    setAudioEnabled(true);
-    playOrderAlertSound();
-    showNotice('🔊 Timbre de cocina probado con éxito');
-  };
 
   const handlePrintTicket = (order: Order) => {
     setPrintingSettlement(false);
@@ -496,21 +558,34 @@ export default function MerchantPage() {
       return;
     }
 
-    // Limpiar grupos de opciones vacíos
+    // Limpiar grupos de opciones vacíos y respetar mínimo/máximo configurados (incluyendo selección múltiple obligatoria)
     const sanitizedOptions: ProductOptionGroup[] = prodOptions
-      .map((grp) => ({
-        ...grp,
-        name: grp.name.trim() || 'Opciones',
-        minSelect: grp.required ? 1 : 0,
-        maxSelect: grp.required ? 1 : Math.max(1, grp.items.length),
-        items: grp.items
+      .map((grp) => {
+        const cleanItems = grp.items
           .filter((it) => it.name.trim().length > 0)
           .map((it) => ({
             ...it,
             name: it.name.trim(),
             additionalPrice: Math.max(0, Number(it.additionalPrice) || 0),
-          })),
-      }))
+          }));
+
+        const maxPossible = Math.max(1, cleanItems.length);
+        const rawMin = grp.required
+          ? Math.max(1, Number(grp.minSelect) || 1)
+          : Math.max(0, Number(grp.minSelect) || 0);
+        const safeMin = Math.min(rawMin, maxPossible);
+        const rawMax = Number(grp.maxSelect) || (grp.required ? safeMin : maxPossible);
+        const safeMax = Math.min(Math.max(safeMin, 1, rawMax), maxPossible);
+
+        return {
+          ...grp,
+          name: grp.name.trim() || 'Opciones',
+          required: safeMin > 0,
+          minSelect: safeMin,
+          maxSelect: safeMax,
+          items: cleanItems,
+        };
+      })
       .filter((grp) => grp.items.length > 0);
 
     const cleanOriginalPrice =
@@ -594,35 +669,8 @@ export default function MerchantPage() {
               </div>
               <h1 className="text-xl font-black text-white">DonDomi Aliados</h1>
               <p className="text-xs text-slate-400">
-                Acceso exclusivo para restaurantes y cocinas afiliadas en Valledupar
+                Ingresa las credenciales de tu restaurante para acceder al panel operativo
               </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-2xl text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginMode('PIN');
-                  setLoginError(null);
-                }}
-                className={`py-2 rounded-xl transition cursor-pointer ${
-                  loginMode === 'PIN' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'
-                }`}
-              >
-                Por Restaurante + PIN
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginMode('EMAIL');
-                  setLoginError(null);
-                }}
-                className={`py-2 rounded-xl transition cursor-pointer ${
-                  loginMode === 'EMAIL' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'
-                }`}
-              >
-                Por Correo + Clave
-              </button>
             </div>
 
             {loginError && (
@@ -633,52 +681,33 @@ export default function MerchantPage() {
             )}
 
             <form onSubmit={handleMerchantLogin} className="space-y-4">
-              {loginMode === 'PIN' ? (
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                    Selecciona tu Restaurante
-                  </label>
-                  <select
-                    value={loginRestId || restaurants[0]?.id || 'rest-1'}
-                    onChange={(e) => setLoginRestId(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  >
-                    {restaurants
-                      .filter((r) => (r.accountStatus || 'ACTIVE') !== 'ARCHIVED')
-                      .map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name} ({r.neighborhood})
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                    Correo del Restaurante
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="elvalle@dondomi.com"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Identificador de Tienda, Usuario o Correo
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoComplete="username"
+                  value={loginIdentifier}
+                  onChange={(e) => setLoginIdentifier(e.target.value)}
+                  placeholder="Correo registrado o código de tienda"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  {loginMode === 'PIN' ? 'PIN de Cocina' : 'Contraseña / PIN'}
+                  PIN de Cocina o Contraseña
                 </label>
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={loginPin}
                   onChange={(e) => setLoginPin(e.target.value)}
-                  placeholder={loginMode === 'PIN' ? 'PIN (ej: 1234)' : 'Contraseña'}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-mono text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="••••••••"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
               </div>
 
@@ -687,13 +716,9 @@ export default function MerchantPage() {
                 disabled={isLoggingIn}
                 className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3.5 rounded-2xl shadow-lg transition text-sm cursor-pointer"
               >
-                {isLoggingIn ? 'Abriendo cocina...' : 'Entrar al Panel Aliado'}
+                {isLoggingIn ? 'Verificando acceso...' : 'Entrar al Panel Aliado'}
               </button>
             </form>
-
-            <div className="pt-2 border-t border-slate-700/60 text-center text-[11px] text-slate-400">
-              💡 PIN de prueba predeterminado: <strong className="text-amber-400 font-mono">1234</strong>
-            </div>
           </div>
         </main>
 
@@ -1248,27 +1273,43 @@ export default function MerchantPage() {
         {/* ============================================================== */}
         {activeTab === 'MENU' && (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+            <div className="flex flex-wrap items-center justify-between gap-2.5 pb-1">
               <div>
                 <h3 className="font-extrabold text-base text-slate-900">
                   Carta de {restaurant.name} ({products.length} platos)
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Administra tus platos, precios, grupos de opciones/adiciones y disponibilidad en tiempo real.
+                  Administra tus categorías, platos, precios, grupos de opciones/adiciones y disponibilidad en tiempo real.
                 </p>
               </div>
 
-              <button
-                onClick={handleOpenAddProduct}
-                className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-orange-600/20 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Agregar Nuevo Plato</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCategoryModalError(null);
+                    setNewCategoryName('');
+                    setIsCategoryModalOpen(true);
+                  }}
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <FolderPlus className="w-4 h-4 text-orange-400" />
+                  <span>Agregar Categoría</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenAddProduct}
+                  className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-3.5 py-2 rounded-2xl text-xs transition flex items-center gap-1.5 shadow-md shadow-orange-600/20 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Agregar Nuevo Plato</span>
+                </button>
+              </div>
             </div>
 
             {/* Filtros por categoría de carta y buscador */}
-            {products.length > 0 && (
+            {(products.length > 0 || menuCategories.length > 0) && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 rounded-2xl border border-slate-200">
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
                   <button
@@ -1768,21 +1809,31 @@ export default function MerchantPage() {
 
             {/* Desglose de Liquidación y Cruce de Domicilios Digitales */}
             <div className="bg-slate-900 text-white rounded-3xl p-5 border border-slate-800 shadow-md space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div className="flex items-center gap-2">
-                  <Wallet className="w-5 h-5 text-orange-400" />
-                  <div>
-                    <h4 className="font-black text-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
+                <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                    <Wallet className="w-4 h-4 text-orange-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-black text-sm leading-tight">
                       Estado de Liquidación y Cuadre de Caja
                     </h4>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
                       Cruce transparente de ventas, domicilios por transferencia y comisión de plataforma.
                     </p>
                   </div>
                 </div>
-                <span className="text-xs font-bold bg-slate-800 text-orange-400 px-3 py-1 rounded-full border border-slate-700">
-                  {settlement.deliveredOrdersCount} entregados · {settlement.cancelledOrdersCount} cancelados
-                </span>
+
+                <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto shrink-0">
+                  <div className="flex items-center justify-center gap-1.5 bg-emerald-950/60 border border-emerald-700/50 text-emerald-300 px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                    <span>{settlement.deliveredOrdersCount} entregados</span>
+                  </div>
+                  <div className="flex items-center justify-center gap-1.5 bg-rose-950/60 border border-rose-700/50 text-rose-300 px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap">
+                    <span className="w-2 h-2 rounded-full bg-rose-400 shrink-0" />
+                    <span>{settlement.cancelledOrdersCount} cancelados</span>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
@@ -1932,15 +1983,41 @@ export default function MerchantPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Categoría en tu Menú *</label>
-                  <input
-                    type="text"
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Categoría en tu Menú *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCategoryModalError(null);
+                        setNewCategoryName('');
+                        setIsCategoryModalOpen(true);
+                      }}
+                      className="text-[11px] font-bold text-orange-600 hover:text-orange-700 hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Nueva categoría</span>
+                    </button>
+                  </div>
+                  <select
                     required
                     value={prodCategory}
                     onChange={(e) => setProdCategory(e.target.value)}
-                    placeholder="Ej: Salchipapas, Hamburguesas, Bebidas"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  />
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
+                  >
+                    <option value="" disabled>
+                      Selecciona una categoría...
+                    </option>
+                    {menuCategories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                    {prodCategory && !menuCategories.includes(prodCategory) && (
+                      <option value={prodCategory}>{prodCategory}</option>
+                    )}
+                  </select>
                 </div>
               </div>
 
@@ -2051,21 +2128,9 @@ export default function MerchantPage() {
                         onChange={(e) =>
                           handleUpdateOptionGroup(grp.id, { name: e.target.value })
                         }
-                        placeholder={`Nombre del grupo #${grpIdx + 1} (Ej: Elige tu acompañamiento)`}
-                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900"
+                        placeholder={`Nombre del grupo #${grpIdx + 1} (Ej: Elige tus salsas o acompañamientos)`}
+                        className="flex-1 min-w-[180px] bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900"
                       />
-
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={grp.required}
-                          onChange={(e) =>
-                            handleUpdateOptionGroup(grp.id, { required: e.target.checked })
-                          }
-                          className="accent-orange-600"
-                        />
-                        <span>Obligatorio (1 opción)</span>
-                      </label>
 
                       <button
                         type="button"
@@ -2075,6 +2140,71 @@ export default function MerchantPage() {
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
+                    </div>
+
+                    {/* Configuración de obligatoriedad y cantidades múltiples (Mínimo / Máximo) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-white p-2.5 rounded-xl border border-slate-200/80">
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={grp.required}
+                          onChange={(e) => {
+                            const isReq = e.target.checked;
+                            const nextMin = isReq ? Math.max(1, grp.minSelect || 1) : 0;
+                            const nextMax = Math.max(nextMin || 1, grp.maxSelect || 1);
+                            handleUpdateOptionGroup(grp.id, {
+                              required: isReq,
+                              minSelect: nextMin,
+                              maxSelect: nextMax,
+                            });
+                          }}
+                          className="accent-orange-600 rounded"
+                        />
+                        <span>Selección Obligatoria</span>
+                      </label>
+
+                      <div className="flex items-center justify-between sm:justify-start gap-2">
+                        <label className="text-[11px] font-bold text-slate-600 whitespace-nowrap">
+                          Mín. requerido:
+                        </label>
+                        <input
+                          type="number"
+                          min={grp.required ? 1 : 0}
+                          max={20}
+                          value={grp.required ? Math.max(1, grp.minSelect || 1) : grp.minSelect ?? 0}
+                          onChange={(e) => {
+                            const rawMin = Math.max(0, Number(e.target.value) || 0);
+                            const isReq = rawMin > 0;
+                            const nextMax = Math.max(rawMin || 1, grp.maxSelect || 1);
+                            handleUpdateOptionGroup(grp.id, {
+                              required: isReq,
+                              minSelect: rawMin,
+                              maxSelect: nextMax,
+                            });
+                          }}
+                          className="w-16 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-extrabold text-slate-900 text-center"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between sm:justify-start gap-2">
+                        <label className="text-[11px] font-bold text-slate-600 whitespace-nowrap">
+                          Máx. permitido:
+                        </label>
+                        <input
+                          type="number"
+                          min={Math.max(1, grp.required ? grp.minSelect || 1 : 1)}
+                          max={30}
+                          value={Math.max(grp.required ? grp.minSelect || 1 : 1, grp.maxSelect || 1)}
+                          onChange={(e) => {
+                            const minAllowed = Math.max(1, grp.required ? grp.minSelect || 1 : 1);
+                            const nextMax = Math.max(minAllowed, Number(e.target.value) || minAllowed);
+                            handleUpdateOptionGroup(grp.id, {
+                              maxSelect: nextMax,
+                            });
+                          }}
+                          className="w-16 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-extrabold text-slate-900 text-center"
+                        />
+                      </div>
                     </div>
 
                     {/* Opciones dentro del grupo */}
@@ -2147,6 +2277,113 @@ export default function MerchantPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: AGREGAR Y GESTIONAR CATEGORÍAS DE LA CARTA */}
+      {/* ============================================================== */}
+      {isCategoryModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto print:hidden">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <FolderPlus className="w-5 h-5 text-orange-600" />
+                <h3 className="font-black text-base text-slate-900">
+                  Categorías de tu Carta
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Crea y organiza las categorías de tu menú para clasificar tus platos (ej. Entradas, Combos, Salchipapas, Bebidas).
+            </p>
+
+            {categoryModalError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                <span className="font-bold leading-tight">{categoryModalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleAddMenuCategory} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => {
+                  setNewCategoryName(e.target.value);
+                  if (categoryModalError) setCategoryModalError(null);
+                }}
+                placeholder="Ej: Asados, Salchipapas, Bebidas..."
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+              <button
+                type="submit"
+                className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-1 shadow-sm cursor-pointer shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Crear</span>
+              </button>
+            </form>
+
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                Categorías Activas ({menuCategories.length})
+              </span>
+
+              {menuCategories.length === 0 ? (
+                <p className="text-xs text-slate-400 py-3 text-center">
+                  Aún no has creado categorías en tu carta.
+                </p>
+              ) : (
+                <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+                  {menuCategories.map((cat) => {
+                    const count = products.filter((p) => p.categoryName === cat).length;
+                    return (
+                      <div
+                        key={cat}
+                        className="flex items-center justify-between bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-2 text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-extrabold text-slate-800 truncate">{cat}</span>
+                          <span className="text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
+                            {count} {count === 1 ? 'plato' : 'platos'}
+                          </span>
+                        </div>
+                        {count === 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMenuCategory(cat)}
+                            className="text-slate-400 hover:text-red-600 p-1 rounded-lg transition cursor-pointer"
+                            title="Eliminar categoría vacía"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-end border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="px-5 py-2 rounded-xl text-xs font-extrabold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
+              >
+                Listo
+              </button>
+            </div>
           </div>
         </div>
       )}
