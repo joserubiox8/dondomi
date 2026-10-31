@@ -831,37 +831,6 @@ export default function MerchantPage() {
         {/* ============================================================== */}
         {activeTab === 'KDS' && (
           <div className="space-y-4">
-            {/* Control Bar: Audio & Timbre */}
-            <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-emerald-950 shadow-2xs">
-              <div>
-                <span className="text-xs font-black uppercase tracking-wider text-emerald-800 block">
-                  Recepción de Pedidos en Tiempo Real
-                </span>
-                <p className="text-xs text-emerald-700 mt-0.5">
-                  Los pedidos entran directamente a cocina. Al empacar, puedes solicitar un Domiciliario DonDomi ($7.000 COP fijo) o despachar con tu propio domiciliario.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
-                <button
-                  onClick={handleTestAudio}
-                  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-3 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs whitespace-nowrap cursor-pointer"
-                >
-                  <Volume2 className="w-3.5 h-3.5" />
-                  <span>Probar Timbre</span>
-                </button>
-
-                <Link
-                  href={`/restaurant/${restaurant.id}`}
-                  target="_blank"
-                  className="bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold px-3 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs whitespace-nowrap"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  <span>Ver Carta Pública</span>
-                </Link>
-              </div>
-            </div>
-
             {/* Métricas de Comanda & Filtros Rápidos */}
             <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
               <button

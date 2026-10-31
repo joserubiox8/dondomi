@@ -321,7 +321,7 @@ export default function Header() {
                           onClick={() => setIsMyOrdersOpen(false)}
                           className="flex-1 bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1 transition"
                         >
-                          <span>{isActive ? 'Rastrear en vivo' : 'Ver detalle'}</span>
+                          <span>{isActive ? 'Rastrear' : 'Ver detalles'}</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </Link>
                         <button

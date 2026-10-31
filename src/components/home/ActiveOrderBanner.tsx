@@ -243,8 +243,12 @@ export default function ActiveOrderBanner() {
 
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 <span className="text-xs font-black bg-white text-slate-900 px-3.5 py-1.5 rounded-xl shadow-xs inline-flex items-center gap-1">
-                  <span>Rastrear</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-orange-600 stroke-[3]" />
+                  <span>{isDelivered ? 'Ver detalles' : 'Rastrear'}</span>
+                  <ChevronRight
+                    className={`w-3.5 h-3.5 stroke-[3] ${
+                      isDelivered ? 'text-emerald-600' : 'text-orange-600'
+                    }`}
+                  />
                 </span>
               </div>
             </div>
