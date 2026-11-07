@@ -61,6 +61,7 @@ export default function MerchantPage() {
     addProduct,
     updateProduct,
     deleteProduct,
+    restoreProduct,
     updateRestaurant,
     toggleRestaurantStatus,
     currentUser,
@@ -240,26 +241,33 @@ export default function MerchantPage() {
     }
   }, [restaurant]);
 
-  const products = productsByRestaurant[restaurant.id] || [];
+  const allRestaurantProducts = productsByRestaurant[restaurant.id] || [];
+  const products = allRestaurantProducts.filter((p) => !p.isArchived);
+  const archivedProducts = allRestaurantProducts.filter((p) => p.isArchived === true);
 
-  // Cargar categorías personalizadas de la carta de este restaurante desde localStorage
+  // Sincronizar categorías personalizadas de la carta desde el restaurante en Supabase (con respaldo local)
   useEffect(() => {
-    if (typeof window === 'undefined' || !restaurant.id) return;
-    try {
-      const saved = localStorage.getItem(`dondomi_merchant_categories_${restaurant.id}`);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setCustomMenuCategories(parsed.filter(Boolean));
-          return;
+    if (!restaurant.id) return;
+    if (Array.isArray(restaurant.customCategories) && restaurant.customCategories.length > 0) {
+      setCustomMenuCategories(restaurant.customCategories.filter(Boolean));
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`dondomi_merchant_categories_${restaurant.id}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setCustomMenuCategories(parsed.filter(Boolean));
+            return;
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
     setCustomMenuCategories([]);
-  }, [restaurant.id]);
+  }, [restaurant.id, restaurant.customCategories]);
 
-  const saveCustomMenuCategories = (nextList: string[]) => {
-    setCustomMenuCategories(nextList);
+  const persistCustomMenuCategories = async (nextList: string[]) => {
     if (typeof window !== 'undefined' && restaurant.id) {
       try {
         localStorage.setItem(
@@ -268,9 +276,17 @@ export default function MerchantPage() {
         );
       } catch {}
     }
+    const res = await updateRestaurant({
+      ...restaurant,
+      customCategories: nextList,
+    });
+    if (res.ok) {
+      setCustomMenuCategories(nextList);
+    }
+    return res;
   };
 
-  // Unificar categorías creadas centralizadamente + categorías de platos existentes
+  // Unificar categorías creadas centralizadamente + categorías de platos activos existentes
   const productCategories = Array.from(
     new Set(products.map((p) => p.categoryName).filter(Boolean))
   );
@@ -282,7 +298,7 @@ export default function MerchantPage() {
       ? combinedCategories
       : ['Platos Fuertes', 'Combos', 'Entradas', 'Bebidas', 'Adicionales'];
 
-  const handleAddMenuCategory = (e: React.FormEvent) => {
+  const handleAddMenuCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     setCategoryModalError(null);
     const clean = newCategoryName.trim();
@@ -295,13 +311,19 @@ export default function MerchantPage() {
       return;
     }
     const updated = [...customMenuCategories, clean];
-    saveCustomMenuCategories(updated);
+    const res = await persistCustomMenuCategories(updated);
+    if (!res.ok) {
+      setCategoryModalError(
+        res.error || 'No se pudo persistir la categoría en Supabase.'
+      );
+      return;
+    }
     setProdCategory(clean);
     setNewCategoryName('');
-    showNotice(`✅ Categoría "${clean}" agregada a tu carta`);
+    showNotice(`✅ Categoría "${clean}" guardada en Supabase`);
   };
 
-  const handleRemoveMenuCategory = (catName: string) => {
+  const handleRemoveMenuCategory = async (catName: string) => {
     const usedCount = products.filter((p) => p.categoryName === catName).length;
     if (usedCount > 0) {
       setCategoryModalError(
@@ -310,7 +332,13 @@ export default function MerchantPage() {
       return;
     }
     const updated = customMenuCategories.filter((c) => c !== catName);
-    saveCustomMenuCategories(updated);
+    const res = await persistCustomMenuCategories(updated);
+    if (!res.ok) {
+      setCategoryModalError(
+        res.error || 'No se pudo eliminar la categoría en Supabase.'
+      );
+      return;
+    }
     if (menuCategoryFilter === catName) {
       setMenuCategoryFilter('TODAS');
     }
@@ -393,9 +421,19 @@ export default function MerchantPage() {
     }, 250);
   };
 
-  // Toggle rápido maestro de Abierto/Cerrado
+  // Toggle rápido maestro de Abierto/Cerrado (verificado en Supabase)
   const handleToggleOpenClose = async () => {
-    await toggleRestaurantStatus(restaurant.id);
+    if (restaurant.isOpen && pendingOrders.length > 0) {
+      showNotice(
+        `⚠️ Tienes ${pendingOrders.length} pedido(s) en espera (PENDING). Acéptalos o recházalos antes de cerrar la cocina.`
+      );
+      return;
+    }
+    const res = await toggleRestaurantStatus(restaurant.id);
+    if (!res.ok) {
+      showNotice(`❌ ${res.error || 'No se pudo actualizar el estado en Supabase'}`);
+      return;
+    }
     showNotice(
       restaurant.isOpen
         ? '🔴 Cocina pausada temporalmente'
@@ -403,7 +441,7 @@ export default function MerchantPage() {
     );
   };
 
-  // Guardar configuración de restaurante
+  // Guardar configuración de restaurante (solo confirma éxito cuando Supabase confirma)
   const handleSaveRestaurantSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSettingsError(null);
@@ -437,8 +475,14 @@ export default function MerchantPage() {
       daviplataNumber: daviplataNumber.trim() || undefined,
       brebKey: brebKey.trim() || undefined,
     };
-    await updateRestaurant(updated);
-    showNotice('✅ Configuración, horarios y cuentas guardadas correctamente');
+    const res = await updateRestaurant(updated);
+    if (!res.ok) {
+      setSettingsError(
+        res.error || 'No se pudo guardar la configuración en Supabase.'
+      );
+      return;
+    }
+    showNotice('✅ Configuración, horarios y cuentas guardadas en Supabase');
   };
 
   // Manejo de Modal de Platos y Grupos de Opciones
@@ -604,8 +648,12 @@ export default function MerchantPage() {
         isPopular: prodIsPopular,
         options: sanitizedOptions.length > 0 ? sanitizedOptions : undefined,
       };
-      await updateProduct(restaurant.id, updated);
-      showNotice(`✅ Plato "${updated.name}" actualizado`);
+      const res = await updateProduct(restaurant.id, updated);
+      if (!res.ok) {
+        setProductFormError(res.error || 'No se pudo actualizar el plato en Supabase.');
+        return;
+      }
+      showNotice(`✅ Plato "${updated.name}" actualizado en Supabase`);
     } else {
       const newProd: Product = {
         id: `prod-${Date.now()}`,
@@ -618,11 +666,16 @@ export default function MerchantPage() {
         categoryName: prodCategory.trim(),
         imageUrl: prodImageUrl.trim() || undefined,
         isAvailable: true,
+        isArchived: false,
         isPopular: prodIsPopular,
         options: sanitizedOptions.length > 0 ? sanitizedOptions : undefined,
       };
-      await addProduct(restaurant.id, newProd);
-      showNotice(`🎉 Plato "${newProd.name}" creado en la carta`);
+      const res = await addProduct(restaurant.id, newProd);
+      if (!res.ok) {
+        setProductFormError(res.error || 'No se pudo guardar el plato en Supabase.');
+        return;
+      }
+      showNotice(`🎉 Plato "${newProd.name}" guardado en Supabase`);
     }
 
     setIsProductModalOpen(false);
@@ -634,9 +687,30 @@ export default function MerchantPage() {
 
   const handleConfirmDeleteProduct = async () => {
     if (!productToDelete) return;
-    await deleteProduct(restaurant.id, productToDelete.id);
-    showNotice(`🗑️ Plato "${productToDelete.name}" eliminado de la carta`);
+    const res = await deleteProduct(restaurant.id, productToDelete.id);
+    if (!res.ok) {
+      showNotice(`❌ ${res.error || 'No se pudo archivar el plato en Supabase'}`);
+      setProductToDelete(null);
+      return;
+    }
+    showNotice(`📦 Plato "${productToDelete.name}" archivado de la carta pública`);
     setProductToDelete(null);
+  };
+
+  const handleRestoreProduct = async (prodId: string, name: string) => {
+    const res = await restoreProduct(restaurant.id, prodId);
+    if (!res.ok) {
+      showNotice(`❌ ${res.error || 'No se pudo restaurar el plato en Supabase'}`);
+      return;
+    }
+    showNotice(`✅ Plato "${name}" restaurado a tu carta`);
+  };
+
+  const handleToggleProductAvailability = async (prodId: string) => {
+    const res = await toggleProductAvailability(restaurant.id, prodId);
+    if (!res.ok) {
+      showNotice(`❌ ${res.error || 'No se pudo cambiar la disponibilidad en Supabase'}`);
+    }
   };
 
   // Liquidación financiera del restaurante según periodo seleccionado
@@ -1417,7 +1491,7 @@ export default function MerchantPage() {
                     <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
                       {/* Switch Agotado Hoy */}
                       <button
-                        onClick={() => toggleProductAvailability(restaurant.id, prod.id)}
+                        onClick={() => handleToggleProductAvailability(prod.id)}
                         className={`px-2.5 py-1 rounded-xl font-bold text-[11px] transition flex items-center gap-1 cursor-pointer ${
                           prod.isAvailable
                             ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
@@ -1433,7 +1507,7 @@ export default function MerchantPage() {
                         <span>{prod.isAvailable ? 'Disponible' : 'Agotado hoy'}</span>
                       </button>
 
-                      {/* Botones Editar y Borrar */}
+                      {/* Botones Editar y Archivar */}
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleOpenEditProduct(prod)}
@@ -1445,8 +1519,8 @@ export default function MerchantPage() {
                         </button>
                         <button
                           onClick={() => handleDeleteProduct(prod.id, prod.name)}
-                          className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition cursor-pointer"
-                          title="Eliminar plato"
+                          className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition cursor-pointer"
+                          title="Archivar plato (ocultar de la carta sin borrar historial)"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1454,6 +1528,55 @@ export default function MerchantPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Sección de Platos Archivados (conservados para historial y con opción de restauración) */}
+            {archivedProducts.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 sm:p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">📦</span>
+                    <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">
+                      Platos Archivados ({archivedProducts.length})
+                    </h4>
+                  </div>
+                  <span className="text-[11px] text-slate-400">
+                    Ocultos del menú público · Histórico protegido
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {archivedProducts.map((archived) => (
+                    <div
+                      key={archived.id}
+                      className="bg-white border border-slate-200/90 rounded-2xl p-3 flex items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-900 truncate">
+                            {archived.name}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            ({archived.categoryName})
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {formatCOP(archived.price)}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreProduct(archived.id, archived.name)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold transition flex-shrink-0 cursor-pointer"
+                        title="Restaurar plato a la carta pública"
+                      >
+                        Restaurar
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -2389,18 +2512,18 @@ export default function MerchantPage() {
       )}
 
       {/* ============================================================== */}
-      {/* MODAL: CONFIRMAR ELIMINACIÓN DE PLATO */}
+      {/* MODAL: CONFIRMAR ARCHIVADO LÓGICO DE PLATO */}
       {/* ============================================================== */}
       {productToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in print:hidden">
           <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-slate-100 text-slate-800 space-y-4 animate-in zoom-in-95">
-            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto text-xl font-bold">
-              🗑️
+            <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto text-xl font-bold">
+              📦
             </div>
             <div className="text-center">
-              <h4 className="font-black text-slate-900 text-base">¿Eliminar plato de tu carta?</h4>
+              <h4 className="font-black text-slate-900 text-base">¿Archivar plato de tu carta?</h4>
               <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                ¿Estás seguro de que deseas eliminar permanentemente <strong>&quot;{productToDelete.name}&quot;</strong>? Los clientes ya no podrán pedirlo en DonDomi.
+                ¿Deseas archivar <strong>&quot;{productToDelete.name}&quot;</strong>? Desaparecerá del menú público y no podrá ser pedido por clientes, pero se conservará en tu historial de ventas y podrás restaurarlo cuando quieras.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 pt-2">
@@ -2414,9 +2537,9 @@ export default function MerchantPage() {
               <button
                 type="button"
                 onClick={handleConfirmDeleteProduct}
-                className="py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-md shadow-red-600/25 transition cursor-pointer"
+                className="py-2.5 px-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-md shadow-amber-600/25 transition cursor-pointer"
               >
-                Sí, eliminar
+                Sí, archivar
               </button>
             </div>
           </div>

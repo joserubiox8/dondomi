@@ -325,12 +325,26 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
       return;
     }
 
-    // Verificar si algún producto de la canasta está marcado como agotado
+    // Verificar existencia, pertenencia al restaurante, estado de archivado y disponibilidad de cada producto
     const restaurantProducts = cartRestaurantId ? productsByRestaurant[cartRestaurantId] || [] : [];
     for (const item of cart) {
       const match = restaurantProducts.find((p) => p.id === item.product.id);
-      if (match && match.isAvailable === false) {
-        setCheckoutError(`El producto "${item.product.name}" se agotó en cocina. Elimínalo de tu canasta antes de continuar.`);
+      if (!match || match.restaurantId !== cartRestaurantId) {
+        setCheckoutError(
+          `El producto "${item.product.name}" ya no se encuentra disponible en la carta de este restaurante. Elimínalo de tu canasta.`
+        );
+        return;
+      }
+      if (match.isArchived) {
+        setCheckoutError(
+          `El producto "${match.name}" fue retirado/archivado del menú y no puede comprarse. Elimínalo de tu canasta antes de continuar.`
+        );
+        return;
+      }
+      if (match.isAvailable === false) {
+        setCheckoutError(
+          `El producto "${match.name}" se agotó en cocina. Elimínalo de tu canasta antes de continuar.`
+        );
         return;
       }
     }
@@ -362,16 +376,23 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
       setDraftOrderNumber(orderNumber);
     }
 
-    const orderItems: OrderItem[] = cart.map((item, idx) => ({
-      id: `item-${orderId}-${idx}-${item.product.id}`,
-      productId: item.product.id,
-      productName: item.product.name,
-      quantity: item.quantity,
-      unitPrice: item.product.price,
-      selectedOptions: item.selectedOptions,
-      notes: item.notes,
-      subtotal: item.itemTotal,
-    }));
+    const orderItems: OrderItem[] = cart.map((item, idx) => {
+      const optionsTotal = (item.selectedOptions || []).reduce(
+        (acc, opt) => acc + (Number(opt.price) || 0),
+        0
+      );
+      const unitPriceWithOptions = item.product.price + optionsTotal;
+      return {
+        id: `item-${orderId}-${idx}-${item.product.id}`,
+        productId: item.product.id,
+        productName: item.product.name,
+        quantity: item.quantity,
+        unitPrice: unitPriceWithOptions,
+        selectedOptions: item.selectedOptions,
+        notes: item.notes,
+        subtotal: unitPriceWithOptions * item.quantity,
+      };
+    });
 
     const newOrder: Order = {
       id: orderId,
@@ -435,6 +456,23 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
         localStorage.setItem('dondomi_active_orders', JSON.stringify(activeOrders));
         localStorage.setItem('dondomi_active_order', newOrder.orderNumber);
         localStorage.setItem('dondomi_active_order_time', Date.now().toString());
+
+        // Registrar también en el historial propio de este dispositivo para "Mis Pedidos"
+        let myDeviceOrderIds: string[] = [];
+        try {
+          const storedHistory = localStorage.getItem('dondomi_my_order_ids_v1');
+          if (storedHistory) {
+            const parsedHist = JSON.parse(storedHistory);
+            if (Array.isArray(parsedHist)) myDeviceOrderIds = parsedHist;
+          }
+        } catch {}
+        if (!myDeviceOrderIds.includes(newOrder.orderNumber)) {
+          myDeviceOrderIds.unshift(newOrder.orderNumber);
+        }
+        if (!myDeviceOrderIds.includes(newOrder.id)) {
+          myDeviceOrderIds.unshift(newOrder.id);
+        }
+        localStorage.setItem('dondomi_my_order_ids_v1', JSON.stringify(myDeviceOrderIds));
       }
 
       setPlacedOrder(newOrder);

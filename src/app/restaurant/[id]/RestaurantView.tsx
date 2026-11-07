@@ -38,9 +38,9 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
   // Buscar restaurante en el estado dinámico
   const restaurant = restaurants.find((r) => r.id === restaurantId);
 
-  // Obtener productos propios de este restaurante (sin mezclar con otros negocios)
+  // Obtener únicamente productos activos (no archivados) propios de este restaurante
   const products = useMemo(
-    () => productsByRestaurant[restaurantId] || [],
+    () => (productsByRestaurant[restaurantId] || []).filter((p) => !p.isArchived),
     [productsByRestaurant, restaurantId]
   );
 

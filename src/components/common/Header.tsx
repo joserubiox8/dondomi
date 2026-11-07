@@ -30,76 +30,64 @@ export default function Header() {
 
   const [isMyOrdersOpen, setIsMyOrdersOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
-  const [savedProfilePhone, setSavedProfilePhone] = useState('');
   const [deviceOrderNums, setDeviceOrderNums] = useState<string[]>([]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        const profile = localStorage.getItem('dondomi_customer_profile_v1');
-        if (profile) {
-          const parsed = JSON.parse(profile);
-          if (parsed.customerPhone) {
-            setSavedProfilePhone(String(parsed.customerPhone).replace(/\D/g, '').slice(0, 10));
+        const list = new Set<string>();
+
+        const storedHistory = localStorage.getItem('dondomi_my_order_ids_v1');
+        if (storedHistory) {
+          const parsed = JSON.parse(storedHistory);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((id) => {
+              if (typeof id === 'string' && id.trim()) list.add(id.trim());
+            });
           }
         }
 
-        let list: string[] = [];
         const storedActive = localStorage.getItem('dondomi_active_orders');
         if (storedActive) {
           const parsed = JSON.parse(storedActive);
-          if (Array.isArray(parsed)) list = [...parsed];
+          if (Array.isArray(parsed)) {
+            parsed.forEach((id) => {
+              if (typeof id === 'string' && id.trim()) list.add(id.trim());
+            });
+          }
         }
+
         const singleActive = localStorage.getItem('dondomi_active_order');
-        if (singleActive && !list.includes(singleActive)) {
-          list.push(singleActive);
+        if (singleActive && singleActive.trim()) {
+          list.add(singleActive.trim());
         }
-        setDeviceOrderNums(list);
-      } catch {}
+
+        setDeviceOrderNums(Array.from(list));
+      } catch {
+        setDeviceOrderNums([]);
+      }
     }
   }, [isMyOrdersOpen, orders]);
 
-  // Pedidos asociados a la sesión / estado global
+  // NOTA DE SEGURIDAD / PRIVACIDAD:
+  // Este filtro restringe la vista de "Mis Pedidos" únicamente a los identificadores de pedido
+  // creados desde este dispositivo (sin emparejar por teléfono compartido y sin ningún fallback
+  // que exponga pedidos globales).
+  // LIMITACIÓN CONOCIDA: localStorage es editable en el navegador del cliente y no constituye
+  // aislamiento criptográfico. La protección definitiva de datos requiere autenticación de
+  // clientes y políticas RLS (Row-Level Security) en Supabase sobre la tabla `orders`.
   const sessionOrders = useMemo(() => {
-    const cleanSavedPhone = savedProfilePhone.replace(/\D/g, '');
+    if (deviceOrderNums.length === 0) return [];
 
-    const matchedByDeviceOrPhone = orders.filter((o) => {
-      const matchesDevice = deviceOrderNums.some(
+    return orders.filter((o) =>
+      deviceOrderNums.some(
         (num) =>
           o.orderNumber.toLowerCase() === num.toLowerCase() ||
           o.id === num ||
           o.orderNumber.toLowerCase() === `dd-${num}`.toLowerCase()
-      );
-      if (matchesDevice) return true;
-
-      if (
-        cleanSavedPhone.length === 10 &&
-        o.customerPhone.replace(/\D/g, '') === cleanSavedPhone
-      ) {
-        return true;
-      }
-
-      if (
-        currentUser?.role === 'CLIENTE' &&
-        currentUser.phone &&
-        o.customerPhone.replace(/\D/g, '') === currentUser.phone.replace(/\D/g, '')
-      ) {
-        return true;
-      }
-
-      return false;
-    });
-
-    if (matchedByDeviceOrPhone.length > 0) {
-      const ids = new Set(matchedByDeviceOrPhone.map((o) => o.id));
-      const activeGlobal = orders.filter(
-        (o) => !ids.has(o.id) && o.status !== 'DELIVERED' && o.status !== 'CANCELLED'
-      );
-      return [...matchedByDeviceOrPhone, ...activeGlobal];
-    }
-
-    return orders;
-  }, [orders, deviceOrderNums, savedProfilePhone, currentUser]);
+      )
+    );
+  }, [orders, deviceOrderNums]);
 
   const activeSessionOrdersCount = useMemo(() => {
     return sessionOrders.filter(
@@ -113,14 +101,14 @@ export default function Header() {
   const displayedOrders = useMemo(() => {
     const q = searchFilter.trim().toLowerCase();
     if (!q) return sessionOrders;
-    return orders.filter(
+    return sessionOrders.filter(
       (o) =>
         o.orderNumber.toLowerCase().includes(q) ||
         o.customerPhone.replace(/\D/g, '').includes(q.replace(/\D/g, '')) ||
         o.restaurantName.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q)
     );
-  }, [sessionOrders, orders, searchFilter]);
+  }, [sessionOrders, searchFilter]);
 
   return (
     <>

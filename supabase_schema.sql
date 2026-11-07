@@ -4,10 +4,18 @@
 -- https://supabase.com/dashboard/project/axnpjyjyziehwwvykrex/sql
 -- ============================================================================
 
--- 1. Asegurar columnas necesarias en la tabla 'restaurants'
-ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS pin text DEFAULT '1234';
+-- 1. Asegurar columnas necesarias en la tabla 'restaurants' y 'products'
+ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS pin text;
+ALTER TABLE IF EXISTS restaurants ALTER COLUMN pin DROP DEFAULT;
 ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS accepts_breb boolean DEFAULT true;
 ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS accepts_card boolean DEFAULT false;
+ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS account_status text NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS email text;
+ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS nequi_number text;
+ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS daviplata_number text;
+ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS breb_key text;
+ALTER TABLE IF EXISTS restaurants ADD COLUMN IF NOT EXISTS custom_categories text[] DEFAULT '{}';
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS is_archived boolean NOT NULL DEFAULT false;
 
 -- 2. Asegurar que las políticas de RLS permitan lectura y escritura pública para el MVP
 ALTER TABLE IF EXISTS restaurants ENABLE ROW LEVEL SECURITY;
@@ -73,7 +81,7 @@ INSERT INTO restaurants (
     'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?auto=format&fit=crop&w=1000&q=80',
     ARRAY['Pollo Asado', 'Broaster', 'Combos Familiares'],
     'Cra 9 # 12-40, Centro', 'Centro Histórico', '300 456 7890',
-    true, '10:30 AM - 10:00 PM', 25, 35, 7000, 15000, 0, '1234', true, true, true, true, false, true
+    true, '10:30 AM - 10:00 PM', 25, 35, 7000, 15000, 0, NULL, true, true, true, true, false, false
 ),
 (
     'rest-2', 'Guatapurí Burger House', 'guatapuri-burger-house',
@@ -82,7 +90,7 @@ INSERT INTO restaurants (
     'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=1000&q=80',
     ARRAY['Hamburguesas', 'Salchipapas', 'Artesanal'],
     'Calle 16 # 19B-12, Los Cortijos', 'Los Cortijos', '312 889 0012',
-    true, '5:00 PM - 11:30 PM', 30, 45, 7000, 20000, 0, '1234', true, true, true, true, false, true
+    true, '5:00 PM - 11:30 PM', 30, 45, 7000, 20000, 0, NULL, true, true, true, true, false, false
 ),
 (
     'rest-3', 'El Asador de Pedro', 'el-asador-de-pedro',
@@ -91,7 +99,7 @@ INSERT INTO restaurants (
     'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=1000&q=80',
     ARRAY['Parrilla', 'Carnes', 'Asados'],
     'Calle 9 # 6-25, Novalito', 'Novalito', '315 223 3445',
-    true, '11:30 AM - 10:00 PM', 35, 50, 7000, 28000, 0, '1234', true, true, true, true, false, true
+    true, '11:30 AM - 10:00 PM', 35, 50, 7000, 28000, 0, NULL, true, true, true, true, false, false
 ),
 (
     'rest-4', 'Pizzería La Sirena Vallenata', 'pizzeria-la-sirena',
@@ -100,7 +108,7 @@ INSERT INTO restaurants (
     'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?auto=format&fit=crop&w=1000&q=80',
     ARRAY['Pizzas', 'Pastas', 'Italiana'],
     'Calle 14 # 7-18, Centro Histórico', 'Centro Histórico', '317 654 3210',
-    true, '4:00 PM - 11:00 PM', 30, 45, 7000, 22000, 0, '1234', true, true, true, true, false, false
+    true, '4:00 PM - 11:00 PM', 30, 45, 7000, 22000, 0, NULL, true, true, true, true, false, false
 ),
 (
     'rest-5', 'Arepas & Fritos Cacique Upar', 'arepas-fritos-cacique',
@@ -109,7 +117,7 @@ INSERT INTO restaurants (
     'https://images.unsplash.com/photo-1589302168068-964664d93dc0?auto=format&fit=crop&w=1000&q=80',
     ARRAY['Arepas', 'Fritos', 'Típico Costeño'],
     'Cra 19 # 9-80, Los Cortijos', 'Los Cortijos', '318 901 2345',
-    true, '6:30 AM - 10:00 PM', 20, 30, 7000, 12000, 0, '1234', true, true, true, true, false, true
+    true, '6:30 AM - 10:00 PM', 20, 30, 7000, 12000, 0, NULL, true, true, true, true, false, false
 ),
 (
     'rest-6', 'Donde Chalo - Comida Rápida', 'donde-chalo',
@@ -118,7 +126,7 @@ INSERT INTO restaurants (
     'https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?auto=format&fit=crop&w=1000&q=80',
     ARRAY['Salchipapas', 'Perros Calientes', 'Desgranados'],
     'Calle 16B # 15-42, San Joaquín', 'San Joaquín', '311 345 6789',
-    true, '5:30 PM - 12:00 AM', 25, 40, 7000, 18000, 0, '1234', true, true, true, true, false, false
+    true, '5:30 PM - 12:00 AM', 25, 40, 7000, 18000, 0, NULL, true, true, true, true, false, false
 )
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,

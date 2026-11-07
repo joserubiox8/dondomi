@@ -39,12 +39,11 @@ export default function DriverPage() {
     updateOrderStatus,
     toggleDriverAvailability,
     logout,
-    loginWithEmail,
     loginAsDriver,
     globalDeliveryFee,
   } = useApp();
 
-  const [loginIdentity, setLoginIdentity] = useState<string>('javier@dondomi.com');
+  const [loginIdentity, setLoginIdentity] = useState<string>('');
   const [loginPass, setLoginPass] = useState<string>('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
@@ -56,8 +55,8 @@ export default function DriverPage() {
     setLoginError(null);
     setIsLoggingIn(true);
     try {
-      const res = await loginWithEmail(loginIdentity, loginPass);
-      if (!res.success || res.role !== 'DOMICILIARIO') {
+      const res = await loginAsDriver(loginIdentity, loginPass);
+      if (!res.success) {
         setLoginError(res.error || 'Credenciales de domiciliario inválidas.');
       }
     } finally {
@@ -160,9 +159,20 @@ export default function DriverPage() {
     } catch {}
   };
 
-  const handleToggleTurn = () => {
-    if (driverRecord) {
-      toggleDriverAvailability(driverRecord.id);
+  const handleToggleTurn = async () => {
+    setErrorNotice(null);
+    if (!driverRecord) return;
+    if (isAvailable && activeOrder) {
+      setErrorNotice(
+        `No puedes pausar tu turno mientras tienes la carrera #${activeOrder.orderNumber} activa. Entrégala o libérala primero.`
+      );
+      return;
+    }
+    const res = await toggleDriverAvailability(driverRecord.id);
+    if (!res.ok) {
+      setErrorNotice(
+        res.error || 'No se pudo actualizar tu estado de turno en Supabase.'
+      );
     }
   };
 
@@ -195,8 +205,13 @@ export default function DriverPage() {
   };
 
   const handleConfirmPickup = async (orderId: string, orderNumber: string) => {
+    setErrorNotice(null);
+    const ok = await confirmOrderPickup(orderId);
+    if (!ok) {
+      setErrorNotice('No se pudo confirmar la recogida en Supabase. Verifica tu conexión.');
+      return;
+    }
     playChime();
-    await confirmOrderPickup(orderId);
     setSuccessNotice(`📦 Recogida de #${orderNumber} confirmada. ¡En camino hacia el cliente!`);
     setTimeout(() => setSuccessNotice(null), 4000);
   };
@@ -211,7 +226,11 @@ export default function DriverPage() {
 
     setIsReleasing(true);
     try {
-      await unclaimOrder(activeOrder.id, finalReason);
+      const ok = await unclaimOrder(activeOrder.id, finalReason);
+      if (!ok) {
+        setErrorNotice('No se pudo liberar la carrera en Supabase. Intenta nuevamente.');
+        return;
+      }
       setSuccessNotice(
         `Carrera #${activeOrder.orderNumber} liberada. El pedido volvió al radar para otros repartidores.`
       );
@@ -226,14 +245,15 @@ export default function DriverPage() {
   };
 
   const handleDeliver = async (orderId: string) => {
+    setErrorNotice(null);
+    const ok = await updateOrderStatus(orderId, 'DELIVERED');
+    if (!ok) {
+      setErrorNotice('No se pudo registrar la entrega en Supabase. Verifica tu conexión.');
+      return;
+    }
     playChime();
-    await updateOrderStatus(orderId, 'DELIVERED');
     setSuccessNotice(`¡Excelente! Entrega confirmada y sumada a tu billetera.`);
     setTimeout(() => setSuccessNotice(null), 4000);
-  };
-
-  const handleQuickDemoLogin = async () => {
-    await loginAsDriver('Javier Morales', '3001234567', '1234');
   };
 
   // Buscar información completa del restaurante para el Punto A de recogida
@@ -276,7 +296,7 @@ export default function DriverPage() {
               </div>
               <h1 className="text-xl font-black text-white">DonDomi Flota</h1>
               <p className="text-xs text-slate-400">
-                Acceso exclusivo para domiciliarios autorizados en Valledupar
+                Ingresa con tus credenciales individuales asignadas por DonDomi
               </p>
             </div>
 
@@ -290,56 +310,42 @@ export default function DriverPage() {
             <form onSubmit={handleDriverLogin} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  Repartidor Registrado / Correo
+                  Correo, Celular (10 dígitos) o Código de Domiciliario
                 </label>
-                <select
+                <input
+                  type="text"
+                  required
+                  autoComplete="username"
                   value={loginIdentity}
                   onChange={(e) => setLoginIdentity(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  {drivers.map((d) => (
-                    <option key={d.id} value={d.email}>
-                      {d.name} ({d.plate}) — {d.email}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Ej: 3001234567 o correo@dondomi.com"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  Contraseña / PIN de Turno
+                  Contraseña Personal
                 </label>
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={loginPass}
                   onChange={(e) => setLoginPass(e.target.value)}
-                  placeholder="Clave o PIN (ej: domi1234 o 1234)"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  placeholder="••••••••"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-3.5 py-3 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={isLoggingIn}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 transition text-sm cursor-pointer"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 transition text-sm cursor-pointer"
               >
-                {isLoggingIn ? 'Iniciando turno...' : 'Iniciar Turno de Reparto'}
+                {isLoggingIn ? 'Verificando credenciales...' : 'Iniciar Turno de Reparto'}
               </button>
             </form>
-
-            <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between text-[11px] text-slate-400">
-              <span>
-                Clave predeterminada: <strong className="text-emerald-400 font-mono">domi1234</strong>
-              </span>
-              <button
-                type="button"
-                onClick={handleQuickDemoLogin}
-                className="text-emerald-400 hover:underline font-bold cursor-pointer"
-              >
-                Acceso rápido Demo →
-              </button>
-            </div>
           </div>
         </main>
 
@@ -426,27 +432,6 @@ export default function DriverPage() {
                 Comunícate con la Torre de Control de DonDomi en Valledupar para reactivar tu perfil.
               </p>
             </div>
-          </div>
-        )}
-
-        {/* Banner de aviso o login */}
-        {currentUser?.role !== 'DOMICILIARIO' && (
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3 flex items-start justify-between gap-2.5 text-xs text-blue-900">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="font-bold">Modo Demo / Vista Previa</p>
-                <p className="text-[11px] text-blue-700">
-                  Inicia sesión como repartidor para registrar carreras a tu nombre.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={handleQuickDemoLogin}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-2.5 py-1.5 rounded-xl text-[11px] whitespace-nowrap shadow-xs cursor-pointer"
-            >
-              Iniciar Turno
-            </button>
           </div>
         )}
 

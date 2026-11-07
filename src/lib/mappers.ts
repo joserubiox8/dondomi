@@ -19,13 +19,13 @@ export function saveLocalRestaurantMeta(rest: Restaurant) {
     const current = getLocalRestaurantsMeta();
     current[rest.id] = {
       email: rest.email,
-      pin: rest.pin,
       accountStatus: rest.accountStatus || 'ACTIVE',
       nequiNumber: rest.nequiNumber,
       daviplataNumber: rest.daviplataNumber,
       brebKey: rest.brebKey,
       acceptsBreb: rest.acceptsBreb,
       acceptsCard: rest.acceptsCard,
+      customCategories: rest.customCategories,
     };
     localStorage.setItem(RESTAURANT_META_STORAGE_KEY, JSON.stringify(current));
   } catch {}
@@ -34,7 +34,7 @@ export function saveLocalRestaurantMeta(rest: Restaurant) {
 // Convertir de modelo TypeScript (camelCase) a Supabase (snake_case)
 export function restaurantToDb(r: Restaurant) {
   saveLocalRestaurantMeta(r);
-  return {
+  const payload: Record<string, any> = {
     id: r.id,
     name: r.name,
     slug: r.slug,
@@ -53,20 +53,27 @@ export function restaurantToDb(r: Restaurant) {
     estimated_time_max: r.estimatedTimeMax,
     delivery_fee_base: r.deliveryFeeBase,
     min_order_amount: r.minOrderAmount,
-    commission_rate: r.commissionRate,
+    commission_rate: r.commissionRate ?? 0,
     accepts_cash: r.acceptsCash,
     accepts_nequi: r.acceptsNequi,
     accepts_daviplata: r.acceptsDaviplata,
     accepts_breb: r.acceptsBreb ?? true,
     accepts_card: r.acceptsCard ?? false,
-    featured: false,
-    pin: r.pin || '1234',
+    featured: false, // Monetización y espacios patrocinados desactivados en esta etapa
+    account_status: r.accountStatus || 'ACTIVE',
+    email: r.email || null,
+    nequi_number: r.nequiNumber || null,
+    daviplata_number: r.daviplataNumber || null,
+    breb_key: r.brebKey || null,
+    custom_categories: Array.isArray(r.customCategories) ? r.customCategories : [],
   };
+  if (r.pin !== undefined) {
+    payload.pin = r.pin || null;
+  }
+  return payload;
 }
 
 export function dbToRestaurant(data: any): Restaurant {
-  const metaMap = getLocalRestaurantsMeta();
-  const localMeta = metaMap[data.id] || {};
   const seed = RESTAURANTS.find((ir) => ir.id === data.id);
   const cleanPhone = (data.phone || seed?.phone || '3004567890').replace(/\D/g, '');
 
@@ -96,16 +103,17 @@ export function dbToRestaurant(data: any): Restaurant {
     commissionRate: Number(data.commission_rate) || 0,
     acceptsCash: data.accepts_cash ?? true,
     acceptsNequi: data.accepts_nequi ?? true,
-    acceptsBreb: localMeta.acceptsBreb ?? data.accepts_breb ?? true,
+    acceptsBreb: data.accepts_breb ?? true,
     acceptsDaviplata: data.accepts_daviplata ?? true,
-    acceptsCard: localMeta.acceptsCard ?? data.accepts_card ?? false,
+    acceptsCard: data.accepts_card ?? false,
     featured: false,
-    pin: localMeta.pin || data.pin || '1234',
-    email: localMeta.email || data.email || seed?.email || `${data.slug || data.id}@dondomi.com`,
-    accountStatus: localMeta.accountStatus || data.account_status || 'ACTIVE',
-    nequiNumber: localMeta.nequiNumber || data.nequi_number || cleanPhone,
-    daviplataNumber: localMeta.daviplataNumber || data.daviplata_number || cleanPhone,
-    brebKey: localMeta.brebKey || data.breb_key || `@${(data.slug || 'comercio').replace(/[^a-z0-9]/gi, '')}`,
+    pin: data.pin || undefined,
+    email: data.email || seed?.email || `${data.slug || data.id}@dondomi.com`,
+    accountStatus: data.account_status || 'ACTIVE',
+    nequiNumber: data.nequi_number || cleanPhone,
+    daviplataNumber: data.daviplata_number || cleanPhone,
+    brebKey: data.breb_key || `@${(data.slug || 'comercio').replace(/[^a-z0-9]/gi, '')}`,
+    customCategories: Array.isArray(data.custom_categories) ? data.custom_categories : [],
   };
 }
 
@@ -120,6 +128,7 @@ export function productToDb(p: Product) {
     original_price: p.originalPrice || null,
     image_url: p.imageUrl || null,
     is_available: p.isAvailable,
+    is_archived: Boolean(p.isArchived),
     is_popular: p.isPopular || false,
     preparation_time_min: p.preparationTimeMin || 20,
     options: p.options && p.options.length > 0 ? p.options : null,
@@ -137,6 +146,7 @@ export function dbToProduct(data: any): Product {
     originalPrice: data.original_price ? Number(data.original_price) : undefined,
     imageUrl: data.image_url || undefined,
     isAvailable: data.is_available ?? true,
+    isArchived: Boolean(data.is_archived),
     isPopular: data.is_popular ?? false,
     preparationTimeMin: data.preparation_time_min || 20,
     options: data.options || undefined,
@@ -166,7 +176,7 @@ export function dbToCategory(data: any): FoodCategory {
 }
 
 export function driverToDb(d: Driver) {
-  return {
+  const payload: Record<string, any> = {
     id: d.id,
     user_id: d.userId || null,
     name: d.name,
@@ -175,9 +185,14 @@ export function driverToDb(d: Driver) {
     plate: d.plate,
     vehicle_type: d.vehicleType || 'MOTO',
     is_active: d.isActive,
+    is_available: d.isAvailable ?? true,
     rating: d.rating,
     total_deliveries: d.totalDeliveries,
   };
+  if (d.passwordHash) {
+    payload.password_hash = d.passwordHash;
+  }
+  return payload;
 }
 
 export function dbToDriver(data: any): Driver {
@@ -188,12 +203,11 @@ export function dbToDriver(data: any): Driver {
     phone: data.phone,
     email: data.email,
     plate: data.plate,
-    vehicleType: (data.vehicle_type as 'MOTO' | 'BICICLETA') || 'MOTO',
+    vehicleType: (data.vehicle_type as 'MOTO' | 'BICICLETA' | 'AUTO') || 'MOTO',
     isActive: data.is_active ?? true,
     isAvailable: data.is_available ?? true,
     rating: Number(data.rating) || 5.0,
     totalDeliveries: Number(data.total_deliveries) || 0,
-    pin: data.pin || '1234',
     createdAt: data.created_at || new Date().toISOString(),
   };
 }

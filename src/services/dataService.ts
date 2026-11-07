@@ -1,21 +1,31 @@
 /**
  * DonDomi - Data Access Layer (Capa Centralizada de Acceso a Datos)
- * 
- * Centraliza la lectura y persistencia de:
+ *
+ * Centraliza la lectura y persistencia en Supabase de:
  * - Categorías de comida (categories)
  * - Flota de domiciliarios (drivers)
  * - Configuración global de la plataforma (platform_config)
  * - Restaurantes (restaurants)
- * - Platos / Menús (products)
+ * - Platos / Menús con archivado lógico (products)
  * - Pedidos y Ciclo de Vida (orders)
- * 
- * Tolerancia a fallos:
- * Si una tabla aún no existe en Supabase (error 42P01 / PGRST), o si hay caída de red,
- * conmuta automáticamente a localStorage / datos iniciales sin interrumpir la experiencia del usuario.
+ *
+ * Regla de honestidad de persistencia:
+ * Ningún fallo de Supabase (incluyendo columnas o tablas pendientes de migración)
+ * se disfraza como un guardado exitoso. Puede guardarse un respaldo local para
+ * recuperación, pero toda mutación devuelve `ok: false` si Supabase no confirmó
+ * la escritura.
  */
 
 import { supabase } from '@/lib/supabase';
-import { FoodCategory, Driver, Restaurant, Product, Order, OrderStatus } from '@/types';
+import {
+  FoodCategory,
+  Driver,
+  Restaurant,
+  Product,
+  Order,
+  OrderStatus,
+  MutationResult,
+} from '@/types';
 import {
   FOOD_CATEGORIES,
   INITIAL_DRIVERS,
@@ -31,11 +41,9 @@ import {
   dbToCategory,
   driverToDb,
   dbToDriver,
-  getLocalRestaurantsMeta,
 } from '@/lib/mappers';
 import { parseOrderNotes } from '@/context/AppContext';
 
-// Claves de almacenamiento local de respaldo
 const STORAGE_KEYS = {
   CATEGORIES: 'dondomi_categories',
   DRIVERS: 'dondomi_drivers',
@@ -52,6 +60,19 @@ export interface PlatformConfig {
   isOpen: boolean;
 }
 
+function formatSupabaseWriteError(error: any, entityLabel: string): string {
+  if (!error) return `Error desconocido guardando ${entityLabel} en Supabase.`;
+  const code = String(error.code || '');
+  const msg = String(error.message || '');
+  if (code === 'PGRST204' || code === '42703' || msg.includes('column')) {
+    return `No se pudo persistir ${entityLabel} en Supabase porque faltan columnas en la base de datos (${msg}). Ejecuta manualmente la migración pendiente: supabase/migrations/20261101_phase1_persistence_and_archive.sql.`;
+  }
+  if (code === '42P01') {
+    return `No se pudo persistir ${entityLabel} en Supabase porque la tabla aún no existe (${msg}). Ejecuta manualmente las migraciones SQL pendientes en Supabase.`;
+  }
+  return `No se pudo guardar ${entityLabel} en Supabase: ${msg || code || 'Error de red o permisos'}.`;
+}
+
 export const dataService = {
   // ==========================================================================
   // 1. CATEGORÍAS DE COMIDA
@@ -64,13 +85,11 @@ export const dataService = {
         .order('display_order', { ascending: true });
 
       if (error) {
-        // Error de tabla no encontrada (42P01) o permisos
         return { data: getLocalCategories(), source: 'local' };
       }
 
       if (data && data.length > 0) {
         const mapped = data.map(dbToCategory);
-        // Actualizar caché local
         if (typeof window !== 'undefined') {
           localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(mapped));
         }
@@ -83,45 +102,75 @@ export const dataService = {
     }
   },
 
-  async saveCategory(cat: FoodCategory): Promise<{ success: boolean; source: 'supabase' | 'local' }> {
-    // 1. Guardar en caché local inmediatamente
+  async saveCategory(cat: FoodCategory): Promise<MutationResult> {
     saveLocalCategory(cat);
-
-    // 2. Intentar guardar en Supabase si la tabla existe
     try {
       const dbRow = categoryToDb(cat);
       const { error } = await supabase.from('categories').upsert([dbRow]);
       if (error) {
-        return { success: true, source: 'local' };
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(error, `la categoría "${cat.name}"`),
+        };
       }
-      return { success: true, source: 'supabase' };
-    } catch {
-      return { success: true, source: 'local' };
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(err, `la categoría "${cat.name}"`),
+      };
     }
   },
 
-  async deleteCategory(catId: string): Promise<{ success: boolean; source: 'supabase' | 'local' }> {
-    removeLocalCategory(catId);
+  async deleteCategory(catId: string): Promise<MutationResult> {
     try {
       const { error } = await supabase.from('categories').delete().eq('id', catId);
-      if (error) return { success: true, source: 'local' };
-      return { success: true, source: 'supabase' };
-    } catch {
-      return { success: true, source: 'local' };
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(error, 'la eliminación de categoría'),
+        };
+      }
+      removeLocalCategory(catId);
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(err, 'la eliminación de categoría'),
+      };
     }
   },
 
   // ==========================================================================
-  // 2. FLOTA DE DOMICILIARIOS
+  // 2. FLOTA DE DOMICILIARIOS (Sin exponer password_hash en consultas cliente)
   // ==========================================================================
   async getDrivers(): Promise<{ data: Driver[]; source: 'supabase' | 'local' }> {
     try {
       const { data, error } = await supabase
         .from('drivers')
-        .select('*')
+        .select(
+          'id, user_id, name, phone, email, plate, vehicle_type, is_active, is_available, rating, total_deliveries, created_at'
+        )
         .order('name');
 
       if (error) {
+        // Si la columna is_available aún no fue migrada (42703), intentar lectura sin password_hash ni is_available
+        if (error.code === '42703' || error.code === 'PGRST204') {
+          const fallback = await supabase
+            .from('drivers')
+            .select(
+              'id, user_id, name, phone, email, plate, vehicle_type, is_active, rating, total_deliveries, created_at'
+            )
+            .order('name');
+          if (!fallback.error && fallback.data && fallback.data.length > 0) {
+            const mapped = fallback.data.map(dbToDriver);
+            return { data: mapped, source: 'supabase' };
+          }
+        }
         return { data: getLocalDrivers(), source: 'local' };
       }
 
@@ -139,27 +188,75 @@ export const dataService = {
     }
   },
 
-  async saveDriver(driver: Driver): Promise<{ success: boolean; source: 'supabase' | 'local' }> {
-    saveLocalDriver(driver);
+  async saveDriver(driver: Driver): Promise<MutationResult> {
     try {
       const dbRow = driverToDb(driver);
       const { error } = await supabase.from('drivers').upsert([dbRow]);
-      if (error) return { success: true, source: 'local' };
-      return { success: true, source: 'supabase' };
-    } catch {
-      return { success: true, source: 'local' };
+      if (error) {
+        saveLocalDriver({ ...driver, passwordHash: undefined });
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(error, `el domiciliario "${driver.name}"`),
+        };
+      }
+      saveLocalDriver({ ...driver, passwordHash: undefined });
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      saveLocalDriver({ ...driver, passwordHash: undefined });
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(err, `el domiciliario "${driver.name}"`),
+      };
     }
   },
 
-  async toggleDriverActive(driverId: string, currentStatus: boolean): Promise<{ success: boolean; source: 'supabase' | 'local' }> {
+  async toggleDriverActive(driverId: string, currentStatus: boolean): Promise<MutationResult> {
     const nextStatus = !currentStatus;
-    toggleLocalDriver(driverId, nextStatus);
     try {
-      const { error } = await supabase.from('drivers').update({ is_active: nextStatus }).eq('id', driverId);
-      if (error) return { success: true, source: 'local' };
-      return { success: true, source: 'supabase' };
-    } catch {
-      return { success: true, source: 'local' };
+      const { error } = await supabase
+        .from('drivers')
+        .update({ is_active: nextStatus })
+        .eq('id', driverId);
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(error, 'el estado del domiciliario'),
+        };
+      }
+      toggleLocalDriver(driverId, nextStatus);
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(err, 'el estado del domiciliario'),
+      };
+    }
+  },
+
+  async updateDriverAvailability(driverId: string, nextAvailable: boolean): Promise<MutationResult> {
+    try {
+      const { error } = await supabase
+        .from('drivers')
+        .update({ is_available: nextAvailable })
+        .eq('id', driverId);
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(error, 'la disponibilidad de turno del domiciliario'),
+        };
+      }
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(err, 'la disponibilidad de turno del domiciliario'),
+      };
     }
   },
 
@@ -187,7 +284,6 @@ export const dataService = {
         isOpen: data.is_open ?? true,
       };
 
-      // Sincronizar local
       saveLocalPlatformConfig(config);
       return { config, source: 'supabase' };
     } catch {
@@ -195,10 +291,9 @@ export const dataService = {
     }
   },
 
-  async updatePlatformConfig(updates: Partial<PlatformConfig>): Promise<{ success: boolean; source: 'supabase' | 'local' }> {
+  async updatePlatformConfig(updates: Partial<PlatformConfig>): Promise<MutationResult> {
     const current = getLocalPlatformConfig();
     const updated: PlatformConfig = { ...current, ...updates };
-    saveLocalPlatformConfig(updated);
 
     try {
       const dbRow = {
@@ -210,10 +305,23 @@ export const dataService = {
         updated_at: new Date().toISOString(),
       };
       const { error } = await supabase.from('platform_config').upsert([dbRow]);
-      if (error) return { success: true, source: 'local' };
-      return { success: true, source: 'supabase' };
-    } catch {
-      return { success: true, source: 'local' };
+      if (error) {
+        saveLocalPlatformConfig(updated);
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(error, 'la configuración global de la plataforma'),
+        };
+      }
+      saveLocalPlatformConfig(updated);
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      saveLocalPlatformConfig(updated);
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(err, 'la configuración global de la plataforma'),
+      };
     }
   },
 
@@ -221,60 +329,51 @@ export const dataService = {
   // 4. RESTAURANTES
   // ==========================================================================
   async getRestaurants(): Promise<{ data: Restaurant[]; error?: any }> {
-    const metaMap = getLocalRestaurantsMeta();
-    const applyMeta = (r: Restaurant): Restaurant => {
-      const m = metaMap[r.id] || {};
-      const cleanPhone = (r.phone || '3004567890').replace(/\D/g, '');
-      return {
-        ...r,
-        accountStatus: m.accountStatus || r.accountStatus || 'ACTIVE',
-        email: m.email || r.email || `${r.slug}@dondomi.com`,
-        pin: m.pin || r.pin || '1234',
-        nequiNumber: m.nequiNumber || r.nequiNumber || cleanPhone,
-        daviplataNumber: m.daviplataNumber || r.daviplataNumber || cleanPhone,
-        brebKey: m.brebKey || r.brebKey || `@${r.slug.replace(/[^a-z0-9]/gi, '')}`,
-        acceptsBreb: m.acceptsBreb ?? r.acceptsBreb ?? true,
-        acceptsCard: m.acceptsCard ?? r.acceptsCard ?? false,
-      };
-    };
-
     try {
       const { data, error } = await supabase.from('restaurants').select('*').order('name');
-      if (error) return { data: INITIAL_RESTAURANTS.map(applyMeta), error };
+      if (error) {
+        return { data: INITIAL_RESTAURANTS, error };
+      }
 
       if (data && data.length > 0) {
         const dbRests = data.map(dbToRestaurant);
         const restMap = new Map<string, Restaurant>();
-        INITIAL_RESTAURANTS.forEach((r) => restMap.set(r.id, applyMeta(r)));
-        dbRests.forEach((r) => restMap.set(r.id, applyMeta(r)));
+        INITIAL_RESTAURANTS.forEach((r) => restMap.set(r.id, r));
+        dbRests.forEach((r) => restMap.set(r.id, r));
         return { data: Array.from(restMap.values()) };
       }
-      return { data: INITIAL_RESTAURANTS.map(applyMeta) };
+      return { data: INITIAL_RESTAURANTS };
     } catch (err) {
-      return { data: INITIAL_RESTAURANTS.map(applyMeta), error: err };
+      return { data: INITIAL_RESTAURANTS, error: err };
     }
   },
 
-  async saveRestaurant(restaurant: Restaurant): Promise<{ success: boolean; error?: any }> {
+  async saveRestaurant(restaurant: Restaurant, isInsert = false): Promise<MutationResult> {
     const dbRow: any = restaurantToDb(restaurant);
     try {
-      const { error } = await supabase.from('restaurants').upsert([dbRow]);
-      if (error && error.code === 'PGRST204') {
-        const fallback = { ...dbRow };
-        delete fallback.pin;
-        delete fallback.accepts_breb;
-        delete fallback.accepts_card;
-        const retry = await supabase.from('restaurants').upsert([fallback]);
-        return { success: !retry.error, error: retry.error };
+      const query = isInsert
+        ? supabase.from('restaurants').insert([dbRow])
+        : supabase.from('restaurants').update(dbRow).eq('id', restaurant.id);
+      const { error } = await query;
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(error, `el restaurante "${restaurant.name}"`),
+        };
       }
-      return { success: !error, error };
-    } catch (err) {
-      return { success: false, error: err };
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(err, `el restaurante "${restaurant.name}"`),
+      };
     }
   },
 
   // ==========================================================================
-  // 5. PRODUCTOS / PLATOS
+  // 5. PRODUCTOS / PLATOS (con soporte de Archivado Lógico)
   // ==========================================================================
   async getProducts(): Promise<{ data: Record<string, Product[]>; error?: any }> {
     try {
@@ -297,6 +396,88 @@ export const dataService = {
       return { data: map };
     } catch (err) {
       return { data: INITIAL_PRODUCTS, error: err };
+    }
+  },
+
+  async saveProduct(product: Product, isInsert = false): Promise<MutationResult> {
+    const dbRow = productToDb(product);
+    try {
+      const query = isInsert
+        ? supabase.from('products').insert([dbRow])
+        : supabase.from('products').upsert([dbRow]);
+      const { error } = await query;
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(error, `el producto "${product.name}"`),
+        };
+      }
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(err, `el producto "${product.name}"`),
+      };
+    }
+  },
+
+  async archiveProduct(productId: string, productName?: string): Promise<MutationResult> {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({ is_archived: true, is_available: false })
+        .eq('id', productId);
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(
+            error,
+            `el archivado del producto "${productName || productId}"`
+          ),
+        };
+      }
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(
+          err,
+          `el archivado del producto "${productName || productId}"`
+        ),
+      };
+    }
+  },
+
+  async restoreProduct(productId: string, productName?: string): Promise<MutationResult> {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({ is_archived: false })
+        .eq('id', productId);
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: formatSupabaseWriteError(
+            error,
+            `la restauración del producto "${productName || productId}"`
+          ),
+        };
+      }
+      return { ok: true, persistedInSupabase: true };
+    } catch (err: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: formatSupabaseWriteError(
+          err,
+          `la restauración del producto "${productName || productId}"`
+        ),
+      };
     }
   },
 
@@ -353,7 +534,7 @@ export const dataService = {
 };
 
 // ============================================================================
-// HELPERS LOCALES DE FALLBACK Y CACHÉ
+// HELPERS LOCALES DE FALLBACK Y CACHÉ DE RECUPERACIÓN
 // ============================================================================
 function getLocalCategories(): FoodCategory[] {
   if (typeof window === 'undefined') return FOOD_CATEGORIES;

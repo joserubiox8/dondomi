@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
+import { validateDriverPasswordPolicy } from '@/lib/passwordPolicy';
 import {
   filterOrdersByPeriod,
   calculateRestaurantSettlement,
@@ -56,6 +57,8 @@ export default function AdminPage() {
     toggleRestaurantStatus,
     productsByRestaurant,
     toggleProductAvailability,
+    archiveProduct,
+    restoreProduct,
     orders,
     categories,
     addCategory,
@@ -158,7 +161,36 @@ export default function AdminPage() {
   const [restNequiNumber, setRestNequiNumber] = useState('');
   const [restDaviplataNumber, setRestDaviplataNumber] = useState('');
   const [restBrebKey, setRestBrebKey] = useState('');
+  const [restTags, setRestTags] = useState<string[]>(['Comida Rápida', 'Valledupar']);
   const [restFormError, setRestFormError] = useState<string | null>(null);
+
+  // Advertencia de suspensión cuando hay pedidos PENDING
+  const [pendingOrdersWarning, setPendingOrdersWarning] = useState<{
+    restaurant: Restaurant;
+    pendingOrders: Order[];
+    targetStatus: 'SUSPENDED' | 'ARCHIVED';
+  } | null>(null);
+
+  // Lista combinada de etiquetas y categorías para asignación en el restaurante
+  const allAvailableCategoryTags = useMemo(() => {
+    const set = new Set<string>([
+      'Comida Rápida',
+      'Hamburguesas',
+      'Pizza',
+      'Parrilla',
+      'Pollo',
+      'Salchipapas',
+      'Desgranados',
+      'Bebidas',
+      'Típica',
+      'Postres',
+      'Valledupar',
+    ]);
+    categories.forEach((c) => {
+      if (c.name?.trim()) set.add(c.name.trim());
+    });
+    return Array.from(set);
+  }, [categories]);
 
   const handleOpenCreateRest = () => {
     setRestFormError(null);
@@ -169,6 +201,7 @@ export default function AdminPage() {
     setRestPhone('');
     setRestEmail('');
     setRestHours('11:00 AM - 10:00 PM');
+    setRestTags(['Comida Rápida', 'Valledupar']);
     setRestCommission(0);
     setRestMinOrder(15000);
     setRestTimeMin(25);
@@ -194,6 +227,7 @@ export default function AdminPage() {
     setRestPhone(r.phone.replace(/\D/g, '').slice(0, 10));
     setRestEmail(r.email || `${r.slug}@dondomi.com`);
     setRestHours(r.openingHours || '11:00 AM - 10:00 PM');
+    setRestTags(Array.isArray(r.tags) && r.tags.length > 0 ? r.tags : ['Local', 'Valledupar']);
     setRestCommission(r.commissionRate || 0);
     setRestMinOrder(r.minOrderAmount || 15000);
     setRestTimeMin(r.estimatedTimeMin || 25);
@@ -219,6 +253,20 @@ export default function AdminPage() {
       return;
     }
 
+    if (editingRest && restAccountStatus !== 'ACTIVE') {
+      const pendingForRest = orders.filter(
+        (o) =>
+          (o.restaurantId === editingRest.id || o.restaurantName === editingRest.name) &&
+          o.status === 'PENDING'
+      );
+      if (pendingForRest.length > 0) {
+        setRestFormError(
+          `No se puede suspender "${editingRest.name}" porque tiene ${pendingForRest.length} pedido(s) en estado PENDIENTE. Debes aceptarlos o cancelarlos en la Torre de Control antes de suspender el comercio.`
+        );
+        return;
+      }
+    }
+
     const slug =
       editingRest?.slug ||
       restName
@@ -235,6 +283,7 @@ export default function AdminPage() {
         phone: cleanPhone,
         email: restEmail.trim() || `${slug}@dondomi.com`,
         openingHours: restHours.trim(),
+        tags: restTags.length > 0 ? restTags : ['Local', 'Valledupar'],
         commissionRate: Number(restCommission) || 0,
         minOrderAmount: Number(restMinOrder) || 0,
         estimatedTimeMin: Number(restTimeMin) || 25,
@@ -250,7 +299,11 @@ export default function AdminPage() {
         daviplataNumber: restDaviplataNumber.trim() || undefined,
         brebKey: restBrebKey.trim() || undefined,
       };
-      await updateRestaurant(updated);
+      const res = await updateRestaurant(updated);
+      if (!res.ok) {
+        setRestFormError(res.error || 'Error al actualizar restaurante');
+        return;
+      }
       showNotice(`✅ Restaurante "${updated.name}" actualizado`);
     } else {
       const created: Restaurant = {
@@ -264,7 +317,7 @@ export default function AdminPage() {
           'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80',
         rating: 5.0,
         reviewsCount: 1,
-        tags: ['Local', 'Valledupar'],
+        tags: restTags.length > 0 ? restTags : ['Comida Rápida', 'Valledupar'],
         address: restAddress.trim() || 'Valledupar, Cesar',
         neighborhood: restNeighborhood.trim(),
         phone: cleanPhone,
@@ -287,7 +340,11 @@ export default function AdminPage() {
         brebKey: restBrebKey.trim() || undefined,
         featured: false,
       };
-      await addRestaurant(created);
+      const res = await addRestaurant(created);
+      if (!res.ok) {
+        setRestFormError(res.error || 'Error al registrar restaurante');
+        return;
+      }
       showNotice(`🎉 Restaurante "${created.name}" afiliado con éxito`);
     }
 
@@ -298,12 +355,32 @@ export default function AdminPage() {
     rest: Restaurant,
     status: 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED'
   ) => {
+    if (status !== 'ACTIVE') {
+      const pendingForRest = orders.filter(
+        (o) =>
+          (o.restaurantId === rest.id || o.restaurantName === rest.name) &&
+          o.status === 'PENDING'
+      );
+      if (pendingForRest.length > 0) {
+        setPendingOrdersWarning({
+          restaurant: rest,
+          pendingOrders: pendingForRest,
+          targetStatus: status,
+        });
+        return;
+      }
+    }
+
     const updated: Restaurant = {
       ...rest,
       accountStatus: status,
       isOpen: status === 'ACTIVE' ? rest.isOpen : false,
     };
-    await updateRestaurant(updated);
+    const res = await updateRestaurant(updated);
+    if (!res.ok) {
+      showNotice(`❌ Error: ${res.error || 'No se pudo actualizar el estado'}`);
+      return;
+    }
     showNotice(
       status === 'ACTIVE'
         ? `🟢 "${rest.name}" reactivado en el catálogo`
@@ -311,6 +388,25 @@ export default function AdminPage() {
         ? `⏸️ "${rest.name}" suspendido temporalmente del catálogo`
         : `📦 "${rest.name}" archivado`
     );
+  };
+
+  const handleForceEmergencySuspension = async () => {
+    if (!pendingOrdersWarning) return;
+    const { restaurant, targetStatus } = pendingOrdersWarning;
+    const updated: Restaurant = {
+      ...restaurant,
+      accountStatus: targetStatus,
+      isOpen: false,
+    };
+    const res = await updateRestaurant(updated);
+    if (!res.ok) {
+      showNotice(`❌ Error: ${res.error || 'No se pudo suspender el restaurante'}`);
+    } else {
+      showNotice(
+        `⚠️ Intervención de emergencia: "${restaurant.name}" puesto en ${targetStatus}. Los pedidos pendientes deben gestionarse en la Torre de Control.`
+      );
+    }
+    setPendingOrdersWarning(null);
   };
 
   const filteredRestaurants = useMemo(() => {
@@ -367,7 +463,7 @@ export default function AdminPage() {
     setIsCategoryModalOpen(true);
   };
 
-  const handleSaveCategory = (e: React.FormEvent) => {
+  const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!catName.trim()) return;
 
@@ -381,7 +477,11 @@ export default function AdminPage() {
         icon: catIcon.trim() || '🍽️',
         badge: catBadge.trim() || undefined,
       };
-      updateCategory(updated);
+      const res = await updateCategory(updated);
+      if (!res.ok) {
+        showNotice(`❌ Error al actualizar categoría: ${res.error || 'Fallo de persistencia'}`);
+        return;
+      }
       showNotice(`✅ Categoría "${updated.name}" actualizada`);
     } else {
       const newCat: FoodCategory = {
@@ -391,17 +491,25 @@ export default function AdminPage() {
         icon: catIcon.trim() || '🍽️',
         badge: catBadge.trim() || undefined,
       };
-      addCategory(newCat);
+      const res = await addCategory(newCat);
+      if (!res.ok) {
+        showNotice(`❌ Error al guardar categoría: ${res.error || 'Fallo de persistencia'}`);
+        return;
+      }
       showNotice(`🎉 Categoría "${newCat.name}" agregada a la pantalla principal`);
     }
 
     setIsCategoryModalOpen(false);
   };
 
-  const handleConfirmDeleteCategory = () => {
+  const handleConfirmDeleteCategory = async () => {
     if (!categoryToDelete) return;
-    deleteCategory(categoryToDelete.id);
-    showNotice(`🗑️ Categoría "${categoryToDelete.name}" eliminada`);
+    const res = await deleteCategory(categoryToDelete.id);
+    if (!res.ok) {
+      showNotice(`❌ Error al eliminar categoría: ${res.error || 'Fallo de persistencia'}`);
+    } else {
+      showNotice(`🗑️ Categoría "${categoryToDelete.name}" eliminada`);
+    }
     setCategoryToDelete(null);
   };
 
@@ -415,7 +523,7 @@ export default function AdminPage() {
   const [drvPhone, setDrvPhone] = useState('');
   const [drvPlate, setDrvPlate] = useState('');
   const [drvEmail, setDrvEmail] = useState('');
-  const [drvPin, setDrvPin] = useState('domi1234');
+  const [drvPassword, setDrvPassword] = useState('');
   const [drvVehicle, setDrvVehicle] = useState<'MOTO' | 'BICICLETA' | 'AUTO'>('MOTO');
   const [driverFormError, setDriverFormError] = useState<string | null>(null);
 
@@ -426,7 +534,7 @@ export default function AdminPage() {
     setDrvPhone('');
     setDrvPlate('');
     setDrvEmail('');
-    setDrvPin('domi1234');
+    setDrvPassword('');
     setDrvVehicle('MOTO');
     setIsDriverModalOpen(true);
   };
@@ -438,7 +546,7 @@ export default function AdminPage() {
     setDrvPhone(drv.phone.replace(/\D/g, '').slice(0, 10));
     setDrvPlate(drv.plate);
     setDrvEmail(drv.email);
-    setDrvPin(drv.pin || 'domi1234');
+    setDrvPassword('');
     setDrvVehicle(drv.vehicleType || 'MOTO');
     setIsDriverModalOpen(true);
   };
@@ -452,6 +560,19 @@ export default function AdminPage() {
       return;
     }
 
+    if (!editingDriver && !drvPassword.trim()) {
+      setDriverFormError('Debes ingresar una contraseña de acceso para el domiciliario.');
+      return;
+    }
+
+    if (drvPassword.trim()) {
+      const policy = validateDriverPasswordPolicy(drvPassword);
+      if (!policy.valid) {
+        setDriverFormError(policy.error || 'Contraseña inválida.');
+        return;
+      }
+    }
+
     if (editingDriver) {
       const updated: Driver = {
         ...editingDriver,
@@ -461,10 +582,13 @@ export default function AdminPage() {
         email:
           drvEmail.trim() ||
           `${drvName.toLowerCase().replace(/[\s\W]+/g, '')}@dondomi.com`,
-        pin: drvPin.trim() || 'domi1234',
         vehicleType: drvVehicle,
       };
-      await updateDriver(updated);
+      const res = await updateDriver(updated, drvPassword.trim() || undefined);
+      if (!res.ok) {
+        setDriverFormError(res.error || 'Error al actualizar domiciliario');
+        return;
+      }
       showNotice(`✅ Domiciliario "${updated.name}" actualizado`);
     } else {
       const driver: Driver = {
@@ -475,7 +599,6 @@ export default function AdminPage() {
         email:
           drvEmail.trim() ||
           `${drvName.toLowerCase().replace(/[\s\W]+/g, '')}@dondomi.com`,
-        pin: drvPin.trim() || 'domi1234',
         vehicleType: drvVehicle,
         isActive: true,
         isAvailable: true,
@@ -483,7 +606,11 @@ export default function AdminPage() {
         rating: 5.0,
         createdAt: new Date().toISOString(),
       };
-      addDriver(driver);
+      const res = await addDriver(driver, drvPassword.trim());
+      if (!res.ok) {
+        setDriverFormError(res.error || 'Error al registrar domiciliario');
+        return;
+      }
       showNotice(`🛵 Domiciliario "${driver.name}" registrado en la flota`);
     }
 
@@ -1642,8 +1769,8 @@ export default function AdminPage() {
 
                         <div className="pt-2 text-xs text-slate-600 space-y-1">
                           <p>
-                            <strong>Correo acceso:</strong> {drv.email} (Clave:{' '}
-                            <span className="font-mono font-bold">{drv.pin || 'domi1234'}</span>)
+                            <strong>Correo acceso:</strong> {drv.email} ·{' '}
+                            <span className="text-emerald-700 font-medium">Contraseña cifrada (scrypt)</span>
                           </p>
                           <p>
                             <strong>Carreras históricas:</strong> {drv.totalDeliveries} ·{' '}
@@ -2135,6 +2262,42 @@ export default function AdminPage() {
                 </div>
               </div>
 
+              {/* Categorías / Etiquetas para filtros en catálogo */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Categorías en Catálogo (Etiquetas de Búsqueda)
+                </label>
+                <div className="flex flex-wrap gap-1.5 p-2.5 bg-slate-50 border border-slate-200 rounded-2xl max-h-32 overflow-y-auto">
+                  {allAvailableCategoryTags.map((catTag) => {
+                    const isSelected = restTags.includes(catTag);
+                    return (
+                      <button
+                        key={catTag}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            setRestTags(restTags.filter((t) => t !== catTag));
+                          } else {
+                            setRestTags([...restTags, catTag]);
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                          isSelected
+                            ? 'bg-orange-600 text-white shadow-xs'
+                            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3 h-3" />}
+                        <span>{catTag}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Permite a los usuarios filtrar este comercio en la página de inicio al pulsar sobre cada categoría.
+                </p>
+              </div>
+
               {/* Métodos de Pago y Cuentas del Restaurante */}
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
                 <span className="text-xs font-extrabold text-slate-800 block">
@@ -2248,39 +2411,107 @@ export default function AdminPage() {
             </div>
 
             {/* Platos del restaurante */}
-            <div className="space-y-2">
-              <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-500">
-                Carta del Restaurante ({(productsByRestaurant[inspectingRest.id] || []).length} platos)
-              </h4>
-              {(productsByRestaurant[inspectingRest.id] || []).length === 0 ? (
-                <p className="text-xs text-slate-400 bg-slate-50 p-4 rounded-2xl text-center">
-                  Este comercio aún no ha cargado platos en su carta.
-                </p>
-              ) : (
-                <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl px-3">
-                  {(productsByRestaurant[inspectingRest.id] || []).map((p) => (
-                    <div key={p.id} className="py-2.5 flex items-center justify-between text-xs">
-                      <div>
-                        <span className="font-bold text-slate-900">{p.name}</span>
-                        <span className="text-slate-400 mx-1.5">•</span>
-                        <span className="text-orange-600 font-semibold">{p.categoryName}</span>
-                        <span className="block font-black text-slate-700">{formatCOP(p.price)}</span>
-                      </div>
-                      <button
-                        onClick={() => toggleProductAvailability(inspectingRest.id, p.id)}
-                        className={`px-2.5 py-1 rounded-xl font-bold text-[11px] cursor-pointer ${
-                          p.isAvailable
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}
-                      >
-                        {p.isAvailable ? 'Disponible' : 'Agotado'}
-                      </button>
+            {(() => {
+              const allRestProds = productsByRestaurant[inspectingRest.id] || [];
+              const activeProds = allRestProds.filter((p) => !p.isArchived);
+              const archivedProds = allRestProds.filter((p) => p.isArchived === true);
+
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-500">
+                      Carta Activa ({activeProds.length} platos)
+                    </h4>
+                  </div>
+                  {activeProds.length === 0 ? (
+                    <p className="text-xs text-slate-400 bg-slate-50 p-4 rounded-2xl text-center">
+                      Este comercio no tiene platos activos en su carta.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl px-3 max-h-56 overflow-y-auto">
+                      {activeProds.map((p) => (
+                        <div key={p.id} className="py-2.5 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-bold text-slate-900">{p.name}</span>
+                            <span className="text-slate-400 mx-1.5">•</span>
+                            <span className="text-orange-600 font-semibold">{p.categoryName}</span>
+                            <span className="block font-black text-slate-700">{formatCOP(p.price)}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleProductAvailability(inspectingRest.id, p.id)}
+                              className={`px-2.5 py-1 rounded-xl font-bold text-[11px] cursor-pointer ${
+                                p.isAvailable
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {p.isAvailable ? 'Disponible' : 'Agotado'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const res = await archiveProduct(inspectingRest.id, p.id);
+                                if (res.ok) {
+                                  showNotice(`📦 "${p.name}" archivado del menú`);
+                                } else {
+                                  showNotice(`❌ Error: ${res.error || 'No se pudo archivar'}`);
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded-xl font-bold text-[11px] bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-800 transition cursor-pointer"
+                              title="Archivar plato (ocultar del catálogo sin borrar pedidos pasados)"
+                            >
+                              Archivar
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+
+                  {/* Sección Platos Archivados */}
+                  {archivedProds.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-extrabold text-xs uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
+                          <span>📦 Platos Archivados ({archivedProds.length})</span>
+                        </h4>
+                        <span className="text-[10px] text-slate-400">
+                          Conservados en Supabase para historial
+                        </span>
+                      </div>
+                      <div className="divide-y divide-amber-200/60 border border-amber-200 bg-amber-50/30 rounded-2xl px-3 max-h-44 overflow-y-auto">
+                        {archivedProds.map((p) => (
+                          <div key={p.id} className="py-2 flex items-center justify-between text-xs">
+                            <div>
+                              <span className="font-bold text-slate-700 line-through">{p.name}</span>
+                              <span className="text-slate-400 mx-1.5">•</span>
+                              <span className="text-slate-500">{p.categoryName}</span>
+                              <span className="block font-bold text-slate-600">{formatCOP(p.price)}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const res = await restoreProduct(inspectingRest.id, p.id);
+                                if (res.ok) {
+                                  showNotice(`✅ "${p.name}" restaurado a la carta`);
+                                } else {
+                                  showNotice(`❌ Error: ${res.error || 'No se pudo restaurar'}`);
+                                }
+                              }}
+                              className="px-3 py-1 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs cursor-pointer"
+                            >
+                              Restaurar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {/* Últimos pedidos del restaurante */}
             <div className="space-y-2 pt-2">
@@ -2670,15 +2901,24 @@ export default function AdminPage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Contraseña / PIN
+                  {editingDriver
+                    ? 'Nueva Contraseña (dejar en blanco para conservar actual)'
+                    : 'Contraseña Personal de Acceso *'}
                 </label>
                 <input
-                  type="text"
-                  value={drvPin}
-                  onChange={(e) => setDrvPin(e.target.value)}
-                  placeholder="domi1234"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900"
+                  type="password"
+                  value={drvPassword}
+                  onChange={(e) => setDrvPassword(e.target.value)}
+                  placeholder={
+                    editingDriver
+                      ? 'Sin cambios (conservar contraseña actual)'
+                      : 'Mínimo 6 caracteres'
+                  }
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Se almacena como hash scrypt en Supabase. Mínimo 6 caracteres; prohibidas claves triviales.
+                </p>
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2">
@@ -2789,20 +3029,108 @@ export default function AdminPage() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  updateOrderStatus(
+                onClick={async () => {
+                  const success = await updateOrderStatus(
                     adminCancellingOrder.id,
                     'CANCELLED',
                     adminCancelReason.trim() || 'Intervención administrativa de emergencia',
                     'ADMINISTRADOR'
                   );
-                  showNotice(`Pedido ${adminCancellingOrder.orderNumber} cancelado forzosamente`);
+                  if (success) {
+                    showNotice(`Pedido ${adminCancellingOrder.orderNumber} cancelado forzosamente`);
+                  } else {
+                    showNotice('❌ No se pudo cancelar el pedido');
+                  }
                   setAdminCancellingOrder(null);
                 }}
                 className="py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-md shadow-red-600/25 transition cursor-pointer"
               >
                 Confirmar Cancelación
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL ADVERTENCIA: RESTAURANTE CON PEDIDOS PENDIENTES */}
+      {/* ============================================================== */}
+      {pendingOrdersWarning && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-amber-600 pb-2 border-b border-slate-100">
+              <div className="w-10 h-10 rounded-2xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-6 h-6 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-black text-base text-slate-900 leading-tight">
+                  Acción Bloqueada: Pedidos Pendientes
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {pendingOrdersWarning.restaurant.name}
+                </p>
+              </div>
+            </div>
+
+            <div className="text-xs text-slate-600 space-y-2">
+              <p>
+                No es posible {pendingOrdersWarning.targetStatus === 'SUSPENDED' ? 'suspender' : 'archivar'} este restaurante porque tiene{' '}
+                <strong className="text-amber-700">
+                  {pendingOrdersWarning.pendingOrders.length} pedido(s) en estado PENDIENTE
+                </strong>{' '}
+                esperando aceptación.
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Para proteger la experiencia del cliente y la integridad del marketplace, el restaurante o el administrador debe aceptar o rechazar estos pedidos antes de suspender la tienda.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 max-h-40 overflow-y-auto space-y-2">
+              {pendingOrdersWarning.pendingOrders.map((o) => (
+                <div key={o.id} className="flex items-center justify-between text-xs bg-white p-2 rounded-xl border border-slate-200">
+                  <div>
+                    <span className="font-black text-slate-900">{o.orderNumber}</span> ·{' '}
+                    <span>{o.customerName}</span>
+                    <span className="block text-[10px] text-slate-400">{formatCOP(o.total)}</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-amber-100 text-amber-800">
+                    PENDIENTE
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-2 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setOrderRestFilter(pendingOrdersWarning.restaurant.name);
+                  setActiveTab('PEDIDOS');
+                  setPendingOrdersWarning(null);
+                }}
+                className="w-full py-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>Ir a Torre de Control para Gestionar Pedidos</span>
+                <ArrowUpRight className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPendingOrdersWarning(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Entendido, Volver
+                </button>
+                <button
+                  type="button"
+                  onClick={handleForceEmergencySuspension}
+                  className="px-3 py-2 rounded-xl text-[11px] font-bold text-red-600 hover:bg-red-50 cursor-pointer"
+                  title="Intervención de emergencia con registro"
+                >
+                  Suspender de Emergencia
+                </button>
+              </div>
             </div>
           </div>
         </div>

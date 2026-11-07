@@ -64,6 +64,7 @@ export interface Product {
   originalPrice?: number; // Para mostrar descuentos, ej: 32000
   imageUrl?: string; // Opcional, para permitir menús 100% textuales
   isAvailable: boolean;
+  isArchived?: boolean; // Archivado lógico (conserva historial de pedidos sin aparecer en el menú público)
   isPopular?: boolean;
   preparationTimeMin?: number;
   options?: ProductOptionGroup[];
@@ -95,12 +96,13 @@ export interface Restaurant {
   acceptsBreb?: boolean; // Llave Bre-B (Transferencias interbancarias inmediatas)
   acceptsCard?: boolean; // Tarjetas crédito/débito (vía Wompi u otra pasarela)
   featured?: boolean;
-  pin?: string; // PIN de 4 dígitos para acceso de contingencia
+  pin?: string; // Credencial de contingencia de tienda
   email?: string; // Correo de acceso del restaurante
   accountStatus?: 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
   nequiNumber?: string;
   daviplataNumber?: string;
   brebKey?: string;
+  customCategories?: string[];
 }
 
 export type OrderStatus =
@@ -178,8 +180,14 @@ export interface Driver {
   totalDeliveries: number;
   completedDeliveries?: number;
   activeOrderId?: string;
-  pin?: string;
+  passwordHash?: string; // Hash criptográfico scrypt generado en servidor; nunca se almacena PIN en texto plano
   createdAt: string;
+}
+
+export interface MutationResult {
+  ok: boolean;
+  error?: string;
+  persistedInSupabase?: boolean;
 }
 
 export interface DeliveryAssignment {

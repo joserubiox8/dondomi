@@ -1,11 +1,23 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserRole, User, Product, SelectedOption, Restaurant, Order, OrderStatus, FoodCategory, Driver } from '@/types';
+import {
+  UserRole,
+  User,
+  Product,
+  SelectedOption,
+  Restaurant,
+  Order,
+  OrderStatus,
+  FoodCategory,
+  Driver,
+  MutationResult,
+} from '@/types';
 import { FOOD_CATEGORIES, INITIAL_DRIVERS, RESTAURANTS as INITIAL_RESTAURANTS, PRODUCTS_BY_RESTAURANT as INITIAL_PRODUCTS, MOCK_ORDERS as INITIAL_ORDERS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
-import { dbToRestaurant, restaurantToDb, dbToProduct, productToDb, dbToCategory, dbToDriver } from '@/lib/mappers';
+import { dbToRestaurant, dbToProduct, dbToCategory, dbToDriver } from '@/lib/mappers';
 import { dataService } from '@/services/dataService';
+import { calculateOrderPricing } from '@/lib/pricing';
 
 export interface CartItem {
   id: string;
@@ -68,7 +80,7 @@ interface AppContextType {
   loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
   loginAsAdmin: (pin: string) => Promise<{ success: boolean; error?: string }>;
   loginAsRestaurant: (restaurantId: string, pin: string) => Promise<{ success: boolean; error?: string }>;
-  loginAsDriver: (name: string, phone: string, pin: string) => Promise<{ success: boolean; error?: string }>;
+  loginAsDriver: (identifier: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 
   // Ubicación del cliente en Valledupar
@@ -108,35 +120,37 @@ interface AppContextType {
 
   // Categorías de comida de Valledupar ("¿Qué se te antoja hoy?")
   categories: FoodCategory[];
-  addCategory: (category: FoodCategory) => void;
-  updateCategory: (category: FoodCategory) => void;
-  deleteCategory: (categoryId: string) => void;
+  addCategory: (category: FoodCategory) => Promise<MutationResult>;
+  updateCategory: (category: FoodCategory) => Promise<MutationResult>;
+  deleteCategory: (categoryId: string) => Promise<MutationResult>;
 
   // Ajustes de Plataforma DonDomi
   globalDeliveryFee: number;
-  setGlobalDeliveryFee: (fee: number) => void;
+  setGlobalDeliveryFee: (fee: number) => Promise<MutationResult>;
   globalAnnouncement: string | null;
-  setGlobalAnnouncement: (announcement: string | null) => void;
+  setGlobalAnnouncement: (announcement: string | null) => Promise<MutationResult>;
 
   // Flota de Domiciliarios
   drivers: Driver[];
-  addDriver: (driver: Driver) => void;
-  updateDriver: (driver: Driver) => void;
-  toggleDriverStatus: (driverId: string) => void;
-  toggleDriverAvailability: (driverId: string) => void;
+  addDriver: (driver: Driver, rawPassword: string) => Promise<MutationResult>;
+  updateDriver: (driver: Driver, rawPassword?: string) => Promise<MutationResult>;
+  toggleDriverStatus: (driverId: string) => Promise<MutationResult>;
+  toggleDriverAvailability: (driverId: string) => Promise<MutationResult>;
 
   // Restaurantes en la nube (Supabase)
   restaurants: Restaurant[];
-  addRestaurant: (newRestaurant: Restaurant) => Promise<void>;
-  updateRestaurant: (restaurant: Restaurant) => Promise<void>;
-  toggleRestaurantStatus: (id: string) => Promise<void>;
+  addRestaurant: (newRestaurant: Restaurant) => Promise<MutationResult>;
+  updateRestaurant: (restaurant: Restaurant) => Promise<MutationResult>;
+  toggleRestaurantStatus: (id: string) => Promise<MutationResult>;
 
-  // Menús y Platos (100% textuales con adiciones)
+  // Menús y Platos (con soporte de Archivado Lógico y Restauración)
   productsByRestaurant: Record<string, Product[]>;
-  addProduct: (restaurantId: string, newProduct: Product) => Promise<void>;
-  updateProduct: (restaurantId: string, updatedProduct: Product) => Promise<void>;
-  deleteProduct: (restaurantId: string, productId: string) => Promise<void>;
-  toggleProductAvailability: (restaurantId: string, productId: string) => Promise<void>;
+  addProduct: (restaurantId: string, newProduct: Product) => Promise<MutationResult>;
+  updateProduct: (restaurantId: string, updatedProduct: Product) => Promise<MutationResult>;
+  deleteProduct: (restaurantId: string, productId: string) => Promise<MutationResult>;
+  archiveProduct: (restaurantId: string, productId: string) => Promise<MutationResult>;
+  restoreProduct: (restaurantId: string, productId: string) => Promise<MutationResult>;
+  toggleProductAvailability: (restaurantId: string, productId: string) => Promise<MutationResult>;
 
   // Pedidos
   orders: Order[];
@@ -251,22 +265,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return FOOD_CATEGORIES;
   });
 
-  const addCategory = (newCat: FoodCategory) => {
-    setCategories((prev) => {
-      const updated = [...prev, newCat];
-      return updated;
-    });
-    dataService.saveCategory(newCat);
+  const addCategory = async (newCat: FoodCategory): Promise<MutationResult> => {
+    const res = await dataService.saveCategory(newCat);
+    if (!res.ok) return res;
+    setCategories((prev) => [...prev, newCat]);
+    return res;
   };
 
-  const updateCategory = (cat: FoodCategory) => {
+  const updateCategory = async (cat: FoodCategory): Promise<MutationResult> => {
+    const res = await dataService.saveCategory(cat);
+    if (!res.ok) return res;
     setCategories((prev) => prev.map((c) => (c.id === cat.id ? cat : c)));
-    dataService.saveCategory(cat);
+    return res;
   };
 
-  const deleteCategory = (catId: string) => {
+  const deleteCategory = async (catId: string): Promise<MutationResult> => {
+    const res = await dataService.deleteCategory(catId);
+    if (!res.ok) return res;
     setCategories((prev) => prev.filter((c) => c.id !== catId));
-    dataService.deleteCategory(catId);
+    return res;
   };
 
   // Ajustes Globales de Plataforma
@@ -278,9 +295,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return 7000;
   });
 
-  const setGlobalDeliveryFee = (fee: number) => {
+  const setGlobalDeliveryFee = async (fee: number): Promise<MutationResult> => {
+    const res = await dataService.updatePlatformConfig({ globalDeliveryFee: fee });
+    if (!res.ok) return res;
     setGlobalDeliveryFeeState(fee);
-    dataService.updatePlatformConfig({ globalDeliveryFee: fee });
+    return res;
   };
 
   const [globalAnnouncement, setGlobalAnnouncementState] = useState<string | null>(() => {
@@ -290,9 +309,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return null;
   });
 
-  const setGlobalAnnouncement = (ann: string | null) => {
+  const setGlobalAnnouncement = async (ann: string | null): Promise<MutationResult> => {
+    const res = await dataService.updatePlatformConfig({ globalAnnouncement: ann });
+    if (!res.ok) return res;
     setGlobalAnnouncementState(ann);
-    dataService.updatePlatformConfig({ globalAnnouncement: ann });
+    return res;
   };
 
   // Flota de Domiciliarios
@@ -308,34 +329,93 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return INITIAL_DRIVERS;
   });
 
-  const addDriver = (driver: Driver) => {
-    setDrivers((prev) => [driver, ...prev]);
-    dataService.saveDriver(driver);
+  const requestPasswordHashFromServer = async (
+    rawPassword: string
+  ): Promise<{ ok: boolean; passwordHash?: string; error?: string }> => {
+    try {
+      const resp = await fetch('/api/driver-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'hash', password: rawPassword }),
+      });
+      const json = await resp.json();
+      if (!resp.ok || !json.ok || !json.passwordHash) {
+        return {
+          ok: false,
+          error: json.error || 'No se pudo generar el hash seguro de la contraseña.',
+        };
+      }
+      return { ok: true, passwordHash: json.passwordHash };
+    } catch (err: any) {
+      return {
+        ok: false,
+        error: err?.message || 'Error de red generando el hash de contraseña en servidor.',
+      };
+    }
   };
 
-  const updateDriver = (driver: Driver) => {
-    setDrivers((prev) => prev.map((d) => (d.id === driver.id ? driver : d)));
-    dataService.saveDriver(driver);
+  const addDriver = async (driver: Driver, rawPassword: string): Promise<MutationResult> => {
+    const hashRes = await requestPasswordHashFromServer(rawPassword);
+    if (!hashRes.ok || !hashRes.passwordHash) {
+      return { ok: false, persistedInSupabase: false, error: hashRes.error };
+    }
+
+    const driverForDb: Driver = {
+      ...driver,
+      passwordHash: hashRes.passwordHash,
+    };
+    const res = await dataService.saveDriver(driverForDb);
+    if (!res.ok) return res;
+
+    const cleanDriver: Driver = { ...driver, passwordHash: undefined };
+    setDrivers((prev) => [cleanDriver, ...prev]);
+    return res;
   };
 
-  const toggleDriverStatus = (driverId: string) => {
+  const updateDriver = async (driver: Driver, rawPassword?: string): Promise<MutationResult> => {
+    let passwordHash: string | undefined;
+    if (rawPassword && rawPassword.trim().length > 0) {
+      const hashRes = await requestPasswordHashFromServer(rawPassword);
+      if (!hashRes.ok || !hashRes.passwordHash) {
+        return { ok: false, persistedInSupabase: false, error: hashRes.error };
+      }
+      passwordHash = hashRes.passwordHash;
+    }
+
+    const driverForDb: Driver = {
+      ...driver,
+      passwordHash,
+    };
+    const res = await dataService.saveDriver(driverForDb);
+    if (!res.ok) return res;
+
+    const cleanDriver: Driver = { ...driver, passwordHash: undefined };
+    setDrivers((prev) => prev.map((d) => (d.id === cleanDriver.id ? cleanDriver : d)));
+    return res;
+  };
+
+  const toggleDriverStatus = async (driverId: string): Promise<MutationResult> => {
     const target = drivers.find((d) => d.id === driverId);
     const currentActive = target ? target.isActive : true;
-    setDrivers((prev) => prev.map((d) => (d.id === driverId ? { ...d, isActive: !d.isActive } : d)));
-    dataService.toggleDriverActive(driverId, currentActive);
+    const res = await dataService.toggleDriverActive(driverId, currentActive);
+    if (!res.ok) return res;
+
+    setDrivers((prev) =>
+      prev.map((d) => (d.id === driverId ? { ...d, isActive: !currentActive } : d))
+    );
+    return res;
   };
 
-  const toggleDriverAvailability = (driverId: string) => {
+  const toggleDriverAvailability = async (driverId: string): Promise<MutationResult> => {
+    const target = drivers.find((d) => d.id === driverId);
+    const nextAvailable = target ? (target.isAvailable === false ? true : false) : true;
+    const res = await dataService.updateDriverAvailability(driverId, nextAvailable);
+    if (!res.ok) return res;
+
     setDrivers((prev) =>
-      prev.map((d) => {
-        if (d.id === driverId) {
-          const updated = { ...d, isAvailable: d.isAvailable === false ? true : false };
-          dataService.saveDriver(updated);
-          return updated;
-        }
-        return d;
-      })
+      prev.map((d) => (d.id === driverId ? { ...d, isAvailable: nextAvailable } : d))
     );
+    return res;
   };
 
   // Autenticación Real de la Plataforma
@@ -693,67 +773,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Manejo de restaurantes sincronizado con Supabase (con fallback tolerante a columnas)
-  const addRestaurant = async (newRest: Restaurant) => {
-    // 1. Actualización optimista inmediata en la UI
+  // Manejo de restaurantes sincronizado con Supabase (solo actualiza estado tras confirmación de Supabase)
+  const addRestaurant = async (newRest: Restaurant): Promise<MutationResult> => {
+    const res = await dataService.saveRestaurant(newRest, true);
+    if (!res.ok) return res;
     setRestaurants((prev) => [newRest, ...prev]);
-
-    // 2. Persistencia en Supabase
-    try {
-      const dbRow: any = restaurantToDb(newRest);
-      const { error } = await supabase.from('restaurants').insert([dbRow]);
-      if (error) {
-        if (error.code === 'PGRST204') {
-          // Si columnas nuevas aún no existen en DB, intentar guardar columnas estándar
-          const fallbackRow = { ...dbRow };
-          delete fallbackRow.pin;
-          delete fallbackRow.accepts_breb;
-          delete fallbackRow.accepts_card;
-          await supabase.from('restaurants').insert([fallbackRow]);
-        } else {
-          console.error('Error guardando restaurante en Supabase:', error);
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    return res;
   };
 
-  const updateRestaurant = async (updated: Restaurant) => {
+  const updateRestaurant = async (updated: Restaurant): Promise<MutationResult> => {
+    const res = await dataService.saveRestaurant(updated, false);
+    if (!res.ok) return res;
     setRestaurants((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
-    try {
-      const dbRow: any = restaurantToDb(updated);
-      const { error } = await supabase.from('restaurants').update(dbRow).eq('id', updated.id);
-      if (error && error.code === 'PGRST204') {
-        const fallbackRow = { ...dbRow };
-        delete fallbackRow.pin;
-        delete fallbackRow.accepts_breb;
-        delete fallbackRow.accepts_card;
-        await supabase.from('restaurants').update(fallbackRow).eq('id', updated.id);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    return res;
   };
 
-  const toggleRestaurantStatus = async (id: string) => {
+  const toggleRestaurantStatus = async (id: string): Promise<MutationResult> => {
     const target = restaurants.find((r) => r.id === id);
-    if (!target) return;
+    if (!target) {
+      return { ok: false, persistedInSupabase: false, error: 'Restaurante no encontrado.' };
+    }
     const newStatus = !target.isOpen;
 
-    setRestaurants((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, isOpen: newStatus } : r))
-    );
-
     try {
-      await supabase.from('restaurants').update({ is_open: newStatus }).eq('id', id);
-    } catch (e) {
-      console.error(e);
+      const { error } = await supabase
+        .from('restaurants')
+        .update({ is_open: newStatus })
+        .eq('id', id);
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: `No se pudo actualizar el estado del restaurante en Supabase: ${error.message}`,
+        };
+      }
+      setRestaurants((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, isOpen: newStatus } : r))
+      );
+      return { ok: true, persistedInSupabase: true };
+    } catch (e: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: e?.message || 'Error de conexión actualizando el estado del restaurante.',
+      };
     }
   };
 
-  // Manejo de platos del menú sincronizado con Supabase
-  const addProduct = async (restaurantId: string, newProduct: Product) => {
+  // Manejo de platos del menú sincronizado con Supabase (con Archivado Lógico y Restauración)
+  const addProduct = async (restaurantId: string, newProduct: Product): Promise<MutationResult> => {
+    const res = await dataService.saveProduct(newProduct, true);
+    if (!res.ok) return res;
+
     setProductsByRestaurant((prev) => {
       const currentList = prev[restaurantId] || [];
       return {
@@ -761,79 +832,246 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         [restaurantId]: [newProduct, ...currentList],
       };
     });
-
-    try {
-      const dbRow = productToDb(newProduct);
-      const { error } = await supabase.from('products').insert([dbRow]);
-      if (error) console.error('Error guardando plato en Supabase:', error);
-    } catch (e) {
-      console.error(e);
-    }
+    return res;
   };
 
-  const deleteProduct = async (restaurantId: string, productId: string) => {
+  const deleteProduct = async (
+    restaurantId: string,
+    productId: string
+  ): Promise<MutationResult> => {
+    const currentList = productsByRestaurant[restaurantId] || [];
+    const target = currentList.find((p) => p.id === productId);
+    const res = await dataService.archiveProduct(productId, target?.name);
+    if (!res.ok) return res;
+
     setProductsByRestaurant((prev) => {
-      const currentList = prev[restaurantId] || [];
+      const list = prev[restaurantId] || [];
       return {
         ...prev,
-        [restaurantId]: currentList.filter((p) => p.id !== productId),
+        [restaurantId]: list.map((p) =>
+          p.id === productId ? { ...p, isArchived: true, isAvailable: false } : p
+        ),
       };
     });
-
-    try {
-      await supabase.from('products').delete().eq('id', productId);
-    } catch (e) {
-      console.error(e);
-    }
+    return res;
   };
 
-  const toggleProductAvailability = async (restaurantId: string, productId: string) => {
-    let nextAvailable = true;
+  const restoreProduct = async (
+    restaurantId: string,
+    productId: string
+  ): Promise<MutationResult> => {
+    const currentList = productsByRestaurant[restaurantId] || [];
+    const target = currentList.find((p) => p.id === productId);
+    const res = await dataService.restoreProduct(productId, target?.name);
+    if (!res.ok) return res;
+
     setProductsByRestaurant((prev) => {
-      const currentList = prev[restaurantId] || [];
+      const list = prev[restaurantId] || [];
       return {
         ...prev,
-        [restaurantId]: currentList.map((p) => {
-          if (p.id === productId) {
-            nextAvailable = !p.isAvailable;
-            return { ...p, isAvailable: nextAvailable };
-          }
-          return p;
-        }),
+        [restaurantId]: list.map((p) =>
+          p.id === productId ? { ...p, isArchived: false } : p
+        ),
       };
     });
+    return res;
+  };
 
+  const toggleProductAvailability = async (
+    restaurantId: string,
+    productId: string
+  ): Promise<MutationResult> => {
+    const currentList = productsByRestaurant[restaurantId] || [];
+    const target = currentList.find((p) => p.id === productId);
+    if (!target) {
+      return { ok: false, persistedInSupabase: false, error: 'Plato no encontrado.' };
+    }
+    if (target.isArchived) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: 'Este plato se encuentra archivado. Restáuralo primero antes de activarlo.',
+      };
+    }
+
+    const nextAvailable = !target.isAvailable;
     try {
-      await supabase.from('products').update({ is_available: nextAvailable }).eq('id', productId);
-    } catch (e) {
-      console.error(e);
+      const { error } = await supabase
+        .from('products')
+        .update({ is_available: nextAvailable })
+        .eq('id', productId);
+      if (error) {
+        return {
+          ok: false,
+          persistedInSupabase: false,
+          error: `No se pudo actualizar la disponibilidad del plato en Supabase: ${error.message}`,
+        };
+      }
+      setProductsByRestaurant((prev) => {
+        const list = prev[restaurantId] || [];
+        return {
+          ...prev,
+          [restaurantId]: list.map((p) =>
+            p.id === productId ? { ...p, isAvailable: nextAvailable } : p
+          ),
+        };
+      });
+      return { ok: true, persistedInSupabase: true };
+    } catch (e: any) {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: e?.message || 'Error de conexión actualizando la disponibilidad del plato.',
+      };
     }
   };
 
-  // Manejo de pedidos sincronizado con Supabase
+  // Manejo de pedidos sincronizado con Supabase (validando en servidor existencia, restaurante, archivado, disponibilidad y precio vigente)
   const addOrder = async (newOrder: Order): Promise<boolean> => {
-    // 1. Validar que el restaurante esté abierto
-    const rest = restaurants.find((r) => r.id === newOrder.restaurantId);
-    if (rest && !rest.isOpen) {
-      throw new Error(`"${rest.name}" se encuentra cerrado en este momento. No es posible procesar el pedido.`);
+    // 1. Verificar estado vigente del restaurante directamente en Supabase
+    const { data: dbRest, error: restErr } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('id', newOrder.restaurantId)
+      .maybeSingle();
+
+    if (restErr || !dbRest) {
+      throw new Error(
+        'No se pudo verificar el estado actual del restaurante en Supabase. Por favor intenta de nuevo.'
+      );
     }
 
-    // 2. Persistir en Supabase primero para verificar inserción real
+    if (
+      dbRest.is_open === false ||
+      (dbRest.account_status && dbRest.account_status !== 'ACTIVE')
+    ) {
+      throw new Error(
+        `"${dbRest.name || newOrder.restaurantName}" se encuentra cerrado o no disponible en este momento. No es posible procesar el pedido.`
+      );
+    }
+
+    // 2. Verificar en Supabase cada producto del pedido (existencia, pertenencia al restaurante, no archivado, disponible y precio vigente)
+    const itemProductIds = Array.from(
+      new Set(newOrder.items.map((it) => it.productId).filter(Boolean))
+    );
+    if (itemProductIds.length === 0) {
+      throw new Error('El pedido no contiene productos válidos.');
+    }
+
+    const { data: dbProducts, error: prodErr } = await supabase
+      .from('products')
+      .select('*')
+      .in('id', itemProductIds);
+
+    if (prodErr || !dbProducts) {
+      throw new Error(
+        'No se pudo verificar la disponibilidad y los precios vigentes de los productos en Supabase. Por favor intenta de nuevo.'
+      );
+    }
+
+    let verifiedSubtotal = 0;
+    const verifiedItems = newOrder.items.map((item) => {
+      const dbProd: any = dbProducts.find((p: any) => p.id === item.productId);
+      if (!dbProd) {
+        throw new Error(
+          `El producto "${item.productName}" ya no existe en el catálogo del restaurante. Retíralo de tu canasta.`
+        );
+      }
+      if (dbProd.restaurant_id !== newOrder.restaurantId) {
+        throw new Error(
+          `El producto "${dbProd.name || item.productName}" no pertenece al restaurante seleccionado.`
+        );
+      }
+      if (dbProd.is_archived === true) {
+        throw new Error(
+          `El producto "${dbProd.name || item.productName}" fue archivado y ya no está disponible para la venta. Retíralo de tu canasta.`
+        );
+      }
+      if (dbProd.is_available === false) {
+        throw new Error(
+          `El producto "${dbProd.name || item.productName}" se agotó en cocina. Retíralo de tu canasta antes de continuar.`
+        );
+      }
+
+      const liveBasePrice = Number(dbProd.price);
+      const liveGroups: any[] = Array.isArray(dbProd.options) ? dbProd.options : [];
+      let liveOptionsTotal = 0;
+      const verifiedOptions = (item.selectedOptions || []).map((selOpt) => {
+        const grp = liveGroups.find((g) => g.name === selOpt.groupName);
+        const optItem = grp?.items?.find((i: any) => i.name === selOpt.itemName);
+        const liveOptPrice =
+          optItem !== undefined ? Number(optItem.additionalPrice) || 0 : Number(selOpt.price) || 0;
+        liveOptionsTotal += liveOptPrice;
+        return {
+          ...selOpt,
+          price: liveOptPrice,
+        };
+      });
+
+      const expectedUnitPrice = liveBasePrice + liveOptionsTotal;
+      const expectedItemSubtotal = expectedUnitPrice * item.quantity;
+
+      if (
+        Math.abs(item.unitPrice - expectedUnitPrice) > 0.01 ||
+        Math.abs(item.subtotal - expectedItemSubtotal) > 0.01
+      ) {
+        const freshProd = dbToProduct(dbProd);
+        setProductsByRestaurant((prev) => ({
+          ...prev,
+          [newOrder.restaurantId]: (prev[newOrder.restaurantId] || []).map((p) =>
+            p.id === freshProd.id ? freshProd : p
+          ),
+        }));
+        setCart((prevCart) => {
+          const updatedCart = prevCart.map((cItem) => {
+            if (cItem.product.id === freshProd.id) {
+              return {
+                ...cItem,
+                product: freshProd,
+                selectedOptions: verifiedOptions,
+                itemTotal: expectedUnitPrice * cItem.quantity,
+              };
+            }
+            return cItem;
+          });
+          saveCartToStorage(updatedCart, cartRestaurantId, cartRestaurantName);
+          return updatedCart;
+        });
+        throw new Error(
+          `El precio de "${dbProd.name}" se actualizó en el menú a $${expectedUnitPrice.toLocaleString(
+            'es-CO'
+          )} COP. Hemos sincronizado tu canasta con el precio vigente de Supabase; verifica el nuevo total y confirma tu pedido.`
+        );
+      }
+
+      verifiedSubtotal += expectedItemSubtotal;
+      return {
+        ...item,
+        productName: dbProd.name || item.productName,
+        unitPrice: expectedUnitPrice,
+        selectedOptions: verifiedOptions,
+        subtotal: expectedItemSubtotal,
+      };
+    });
+
+    const verifiedPricing = calculateOrderPricing(verifiedSubtotal, newOrder.deliveryFee);
+
+    // 3. Persistir en Supabase con precios e ítems verificados
     const dbRow = {
       id: newOrder.id,
       order_number: newOrder.orderNumber,
       customer_name: newOrder.customerName,
       customer_phone: newOrder.customerPhone,
       restaurant_id: newOrder.restaurantId,
-      restaurant_name: newOrder.restaurantName,
+      restaurant_name: dbRest.name || newOrder.restaurantName,
       driver_id: newOrder.driverId || null,
       driver_name: newOrder.driverName || null,
       status: newOrder.status,
-      items: newOrder.items,
-      subtotal: newOrder.subtotal,
-      delivery_fee: newOrder.deliveryFee,
-      service_fee: newOrder.serviceFee,
-      total: newOrder.total,
+      items: verifiedItems,
+      subtotal: verifiedPricing.subtotal,
+      delivery_fee: verifiedPricing.deliveryFee,
+      service_fee: verifiedPricing.serviceFee,
+      total: verifiedPricing.total,
       payment_method: newOrder.paymentMethod,
       payment_status: newOrder.paymentStatus,
       delivery_address: newOrder.deliveryAddress,
@@ -844,11 +1082,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const { error } = await supabase.from('orders').insert([dbRow]);
     if (error) {
       console.error('Error guardando pedido en Supabase:', error);
-      throw new Error('Hubo un problema de conexión al registrar la orden. Por favor intenta de nuevo.');
+      throw new Error('Hubo un problema de conexión al registrar la orden en Supabase. Por favor intenta de nuevo.');
     }
 
-    // Actualizar estado local sólo después de confirmar guardado
-    setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== newOrder.id)]);
+    const confirmedOrder: Order = {
+      ...newOrder,
+      restaurantName: dbRest.name || newOrder.restaurantName,
+      items: verifiedItems,
+      subtotal: verifiedPricing.subtotal,
+      deliveryFee: verifiedPricing.deliveryFee,
+      serviceFee: verifiedPricing.serviceFee,
+      total: verifiedPricing.total,
+    };
+
+    // Actualizar estado local sólo después de confirmar guardado en Supabase
+    setOrders((prev) => [confirmedOrder, ...prev.filter((o) => o.id !== confirmedOrder.id)]);
     return true;
   };
 
@@ -1156,29 +1404,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Volver a pedir: carga en la canasta los platos de una orden previa
+  // Volver a pedir: carga en la canasta únicamente los platos vigentes, disponibles y no archivados con su precio actual
   const reorderItems = (order: Order) => {
     const restProducts = productsByRestaurant[order.restaurantId] || [];
-    const newCartItems: CartItem[] = order.items.map((it, idx) => {
-      const foundProd = restProducts.find((p) => p.id === it.productId || p.name === it.productName);
-      const productObj: Product = foundProd || {
-        id: it.productId || `re-prod-${idx}`,
-        restaurantId: order.restaurantId,
-        categoryName: 'Menú',
-        name: it.productName,
-        description: '',
-        price: it.unitPrice,
-        isAvailable: true,
-      };
-      return {
-        id: `${productObj.id}-${Date.now()}-${idx}`,
-        product: productObj,
+    const newCartItems: CartItem[] = [];
+
+    order.items.forEach((it, idx) => {
+      const foundProd = restProducts.find(
+        (p) => p.id === it.productId || p.name === it.productName
+      );
+      if (!foundProd || foundProd.isArchived || foundProd.isAvailable === false) {
+        return;
+      }
+      const optionsTotal = (it.selectedOptions || []).reduce(
+        (acc, opt) => acc + (Number(opt.price) || 0),
+        0
+      );
+      const liveUnitPrice = foundProd.price + optionsTotal;
+      newCartItems.push({
+        id: `${foundProd.id}-${Date.now()}-${idx}`,
+        product: foundProd,
         quantity: it.quantity,
         selectedOptions: it.selectedOptions,
         notes: it.notes,
-        itemTotal: it.subtotal,
-      };
+        itemTotal: liveUnitPrice * it.quantity,
+      });
     });
+
+    if (newCartItems.length === 0) return;
 
     setCartRestaurantId(order.restaurantId);
     setCartRestaurantName(order.restaurantName);
@@ -1196,23 +1449,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const nextStatus: OrderStatus =
       target.status === 'PREPARING' ? 'PREPARING' : 'READY_FOR_PICKUP';
 
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === orderId
-          ? {
-              ...o,
-              status: nextStatus,
-              driverId: undefined,
-              driverName: undefined,
-              customerNotes: updatedNotes,
-              incidentReason,
-            }
-          : o
-      )
-    );
-
     try {
-      await supabase
+      const { error } = await supabase
         .from('orders')
         .update({
           status: nextStatus,
@@ -1221,6 +1459,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           customer_notes: updatedNotes,
         })
         .eq('id', orderId);
+      if (error) {
+        console.error('Error liberando carrera en Supabase:', error);
+        return false;
+      }
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? {
+                ...o,
+                status: nextStatus,
+                driverId: undefined,
+                driverName: undefined,
+                customerNotes: updatedNotes,
+                incidentReason,
+              }
+            : o
+        )
+      );
       return true;
     } catch (e) {
       console.error('Error liberando carrera:', e);
@@ -1228,8 +1484,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Actualizar plato para un restaurante
-  const updateProduct = async (restaurantId: string, updatedProduct: Product) => {
+  // Actualizar plato para un restaurante (solo confirma tras persistir en Supabase)
+  const updateProduct = async (
+    restaurantId: string,
+    updatedProduct: Product
+  ): Promise<MutationResult> => {
+    const res = await dataService.saveProduct(updatedProduct, false);
+    if (!res.ok) return res;
+
     setProductsByRestaurant((prev) => {
       const current = prev[restaurantId] || [];
       return {
@@ -1237,16 +1499,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         [restaurantId]: current.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)),
       };
     });
+    return res;
+  };
 
+  // Verificación de domiciliario del lado servidor (hash criptográfico scrypt en /api/driver-auth)
+  const verifyDriverOnServer = async (
+    identifier: string,
+    password: string
+  ): Promise<{ success: boolean; driver?: Driver; error?: string }> => {
     try {
-      const dbRow = productToDb(updatedProduct);
-      await supabase.from('products').upsert([dbRow]);
-    } catch (err) {
-      console.warn('Error actualizando plato en Supabase:', err);
+      const resp = await fetch('/api/driver-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify',
+          identifier: identifier.trim(),
+          password: password.trim(),
+        }),
+      });
+      const json = await resp.json();
+      if (!resp.ok || !json.ok || !json.driver) {
+        return {
+          success: false,
+          error: json.error || 'Credenciales de domiciliario inválidas.',
+        };
+      }
+      return { success: true, driver: json.driver };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.message || 'Error de conexión verificando credenciales del domiciliario.',
+      };
     }
   };
 
-  // Login inteligente universal con correo y contraseña
+  // Login inteligente universal con correo/identificador y contraseña
   const loginWithEmail = async (
     email: string,
     pass: string
@@ -1255,7 +1542,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const cleanPass = pass.trim();
 
     if (!cleanEmail || !cleanPass) {
-      return { success: false, error: 'Por favor ingresa tu correo y contraseña.' };
+      return { success: false, error: 'Por favor ingresa tu identificador/correo y contraseña.' };
     }
 
     // 1. Detección Administrador
@@ -1279,7 +1566,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { success: true, role: 'ADMINISTRADOR' };
     }
 
-    // Aliases conocidos para pruebas rápidas y accesos directos
     const RESTAURANT_ALIASES: Record<string, string> = {
       'elvalle@dondomi.com': 'rest-1',
       'polloselvalle@dondomi.com': 'rest-1',
@@ -1288,12 +1574,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       'elasadordepedro@dondomi.com': 'rest-3',
       'lasirena@dondomi.com': 'rest-4',
       'caciqueupar@dondomi.com': 'rest-5',
-      'donchalo@dondomi.com': 'rest-chalo',
-    };
-
-    const DRIVER_ALIASES: Record<string, string> = {
-      'javier@dondomi.com': 'drv-1',
-      'carlos@dondomi.com': 'drv-2',
+      'donchalo@dondomi.com': 'rest-6',
     };
 
     // 2. Detección Restaurante (por alias, correo, código/ID, slug, nombre o teléfono)
@@ -1302,7 +1583,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const targetRestId =
       RESTAURANT_ALIASES[cleanEmail] || RESTAURANT_ALIASES[`${cleanEmail}@dondomi.com`];
     const foundRest = targetRestId
-      ? restaurants.find((r) => r.id === targetRestId) || INITIAL_RESTAURANTS.find((r) => r.id === targetRestId)
+      ? restaurants.find((r) => r.id === targetRestId)
       : restaurants.find(
           (r) =>
             r.id.toLowerCase() === cleanEmail ||
@@ -1318,16 +1599,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (foundRest) {
       if (foundRest.accountStatus === 'ARCHIVED') {
-        return { success: false, error: 'La cuenta de este restaurante ha sido archivada por la administración.' };
+        return {
+          success: false,
+          error: 'La cuenta de este restaurante ha sido archivada por la administración.',
+        };
       }
-      const expectedPin = foundRest.pin || '1234';
-      if (cleanPass !== 'cocina1234' && cleanPass !== expectedPin && cleanPass !== '1234') {
+      if (!foundRest.pin) {
+        return {
+          success: false,
+          error:
+            'Este restaurante aún no tiene una clave/PIN asignada en Supabase. Solicita al administrador configurarla.',
+        };
+      }
+      if (cleanPass !== foundRest.pin) {
         return { success: false, error: 'Contraseña de restaurante incorrecta.' };
       }
       const user: User = {
         id: `user-${foundRest.id}`,
         name: foundRest.name,
-        email: cleanEmail,
+        email: foundRest.email || cleanEmail,
         role: 'RESTAURANTE',
         restaurantId: foundRest.id,
         phone: foundRest.phone,
@@ -1342,30 +1632,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { success: true, role: 'RESTAURANTE' };
     }
 
-    // 3. Detección Domiciliario (por alias directo, email o por teléfono)
-    const targetDriverId = DRIVER_ALIASES[cleanEmail];
-    const foundDriver = targetDriverId
-      ? drivers.find((d) => d.id === targetDriverId) || INITIAL_DRIVERS.find((d) => d.id === targetDriverId)
-      : drivers.find(
-          (d) =>
-            d.email.toLowerCase() === cleanEmail ||
-            d.phone.replace(/\D/g, '') === cleanEmail.replace(/\D/g, '') ||
-            d.name.toLowerCase().replace(/[\s\W]+/g, '') + '@dondomi.com' === cleanEmail
-        );
+    // 3. Detección Domiciliario (validación criptográfica del lado servidor en /api/driver-auth)
+    const matchesKnownDriver = drivers.some(
+      (d) =>
+        d.id.toLowerCase() === cleanEmail ||
+        d.email.toLowerCase() === cleanEmail ||
+        (cleanIdentityDigits.length === 10 && d.phone.replace(/\D/g, '') === cleanIdentityDigits)
+    );
 
-    if (foundDriver) {
-      if (!foundDriver.isActive) {
-        return { success: false, error: 'Tu cuenta de domiciliario se encuentra suspendida temporalmente.' };
+    if (matchesKnownDriver || cleanEmail.startsWith('drv-')) {
+      const drvAuth = await verifyDriverOnServer(cleanEmail, cleanPass);
+      if (!drvAuth.success || !drvAuth.driver) {
+        return {
+          success: false,
+          error: drvAuth.error || 'Credenciales de domiciliario inválidas.',
+        };
       }
-      const expectedDriverPin = foundDriver.pin || 'domi1234';
-      if (cleanPass !== 'domi1234' && cleanPass !== expectedDriverPin && cleanPass !== '1234') {
-        return { success: false, error: 'Contraseña de domiciliario incorrecta.' };
-      }
+      const verified = drvAuth.driver;
       const user: User = {
-        id: foundDriver.id,
-        name: foundDriver.name,
-        email: foundDriver.email,
-        phone: foundDriver.phone,
+        id: verified.id,
+        name: verified.name,
+        email: verified.email,
+        phone: verified.phone,
         role: 'DOMICILIARIO',
         createdAt: new Date().toISOString(),
       };
@@ -1377,9 +1665,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { success: true, role: 'DOMICILIARIO' };
     }
 
-    // Si es dominio dondomi y no existe
     if (cleanEmail.includes('@dondomi.com')) {
-      return { success: false, error: 'No se encontró ninguna cuenta activa con este correo en DonDomi.' };
+      return {
+        success: false,
+        error: 'No se encontró ninguna cuenta activa con este correo en DonDomi.',
+      };
     }
 
     // 4. Usuario Cliente general
@@ -1398,10 +1688,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true, role: 'CLIENTE' };
   };
 
-  // Métodos de autenticación unificada
+  // Métodos de autenticación por rol
   const loginAsAdmin = async (pin: string): Promise<{ success: boolean; error?: string }> => {
     if (pin.trim() !== '2026') {
-      return { success: false, error: 'PIN Maestro de Administrador incorrecto (PIN: 2026).' };
+      return { success: false, error: 'PIN Maestro de Administrador incorrecto.' };
     }
     const user: User = {
       id: 'admin-master',
@@ -1418,13 +1708,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true };
   };
 
-  const loginAsRestaurant = async (restaurantId: string, pin: string): Promise<{ success: boolean; error?: string }> => {
+  const loginAsRestaurant = async (
+    restaurantId: string,
+    pin: string
+  ): Promise<{ success: boolean; error?: string }> => {
     const rest = restaurants.find((r) => r.id === restaurantId);
     if (!rest) {
       return { success: false, error: 'Restaurante no encontrado.' };
     }
-    const expectedPin = rest.pin || '1234';
-    if (pin.trim() !== expectedPin) {
+    if (!rest.pin) {
+      return {
+        success: false,
+        error:
+          'Este restaurante aún no tiene una clave/PIN asignada en Supabase. Solicita al administrador configurarla.',
+      };
+    }
+    if (pin.trim() !== rest.pin) {
       return { success: false, error: 'PIN de Cocina incorrecto para este restaurante.' };
     }
     const user: User = {
@@ -1444,17 +1743,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { success: true };
   };
 
-  const loginAsDriver = async (name: string, phone: string, pin: string): Promise<{ success: boolean; error?: string }> => {
-    if (!name.trim() || !phone.trim()) {
-      return { success: false, error: 'Completa tu nombre y celular para iniciar turno.' };
+  const loginAsDriver = async (
+    identifier: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!identifier.trim() || !password.trim()) {
+      return {
+        success: false,
+        error: 'Ingresa tu identificador (correo, celular o código) y tu contraseña.',
+      };
     }
-    if (pin.trim() !== '1234') {
-      return { success: false, error: 'PIN de Domiciliario incorrecto (PIN: 1234).' };
+    const drvAuth = await verifyDriverOnServer(identifier, password);
+    if (!drvAuth.success || !drvAuth.driver) {
+      return {
+        success: false,
+        error: drvAuth.error || 'Credenciales de domiciliario inválidas.',
+      };
     }
+    const verified = drvAuth.driver;
     const user: User = {
-      id: `drv-${phone.trim().replace(/\D/g, '') || Date.now()}`,
-      name: name.trim(),
-      phone: phone.trim(),
+      id: verified.id,
+      name: verified.name,
+      email: verified.email,
+      phone: verified.phone,
       role: 'DOMICILIARIO',
       createdAt: new Date().toISOString(),
     };
@@ -1504,6 +1815,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     selectedOptions: SelectedOption[] = [],
     notes: string = ''
   ) => {
+    if (product.isArchived || product.isAvailable === false) {
+      return;
+    }
     setCartRestaurantId(product.restaurantId);
     setCartRestaurantName(restaurantName);
 
@@ -1534,6 +1848,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     selectedOptions: SelectedOption[] = [],
     notes: string = ''
   ) => {
+    if (product.isArchived || product.isAvailable === false) {
+      return;
+    }
     if (cartRestaurantId && cartRestaurantId !== product.restaurantId && cart.length > 0) {
       setPendingCartSwitch({
         product,
@@ -1637,6 +1954,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addProduct,
         updateProduct,
         deleteProduct,
+        archiveProduct: deleteProduct,
+        restoreProduct,
         toggleProductAvailability,
         currentUser,
         loginWithEmail,
