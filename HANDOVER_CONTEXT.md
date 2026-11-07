@@ -184,20 +184,24 @@ USING (customer_id = auth.uid());
 
 ---
 
-## 9. Comandos Operativos de Referencia
+## 9. Comandos Operativos de Referencia (Google Antigravity Remote)
 
 ```bash
-# Instalación de dependencias (respetando package-lock.json)
-npm install
+# Instalación limpia de dependencias (respetando package-lock.json)
+npm ci
+# o bien: npm install
 
-# Servidor de desarrollo (OBLIGATORIO usar --webpack en Termux)
-npx next dev --webpack
+# Servidor de desarrollo (Turbopack nativo habilitado en la nube)
+npm run dev
+# o bien: npx next dev
 
-# Compilación de producción (OBLIGATORIO usar --webpack en Termux)
-npx next build --webpack
+# Compilación de producción (Turbopack nativo)
+npm run build
+# o bien: npx next build
 
 # Verificación de TypeScript
-npx tsc --noEmit
+npm run type-check
+# o bien: npx tsc --noEmit
 ```
 
 ---
