@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Shield,
@@ -57,6 +57,7 @@ export default function AdminPage() {
     updateRestaurant,
     toggleRestaurantStatus,
     productsByRestaurant,
+    fetchProductsForRestaurant,
     toggleProductAvailability,
     archiveProduct,
     restoreProduct,
@@ -142,6 +143,12 @@ export default function AdminPage() {
   const [isRestModalOpen, setIsRestModalOpen] = useState(false);
   const [editingRest, setEditingRest] = useState<Restaurant | null>(null);
   const [inspectingRest, setInspectingRest] = useState<Restaurant | null>(null);
+
+  useEffect(() => {
+    if (inspectingRest?.id) {
+      fetchProductsForRestaurant(inspectingRest.id);
+    }
+  }, [inspectingRest?.id, fetchProductsForRestaurant]);
 
   const [restName, setRestName] = useState('');
   const [restNeighborhood, setRestNeighborhood] = useState('Centro Histórico');

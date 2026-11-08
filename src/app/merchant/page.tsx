@@ -78,6 +78,7 @@ export default function MerchantPage() {
     restaurants,
     orders,
     productsByRestaurant,
+    fetchProductsForRestaurant,
     updateOrderStatus,
     dispatchWithOwnDriver,
     confirmOrderPayment,
@@ -316,6 +317,13 @@ export default function MerchantPage() {
       setBrebKey(restaurant.brebKey || '');
     }
   }, [restaurant]);
+
+  // Carga bajo demanda del menú del restaurante para la Caja POS y gestión de carta
+  useEffect(() => {
+    if (restaurant?.id) {
+      fetchProductsForRestaurant(restaurant.id);
+    }
+  }, [restaurant?.id, fetchProductsForRestaurant]);
 
   const allRestaurantProducts = productsByRestaurant[restaurant.id] || [];
   const products = allRestaurantProducts.filter((p) => !p.isArchived);

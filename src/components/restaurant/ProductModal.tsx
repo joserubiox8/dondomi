@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Plus, Minus, Check, AlertCircle } from 'lucide-react';
 import { Product, SelectedOption, ProductOptionItem } from '@/types';
 import { formatCOP } from '@/lib/utils';
@@ -24,6 +24,16 @@ export default function ProductModal({
   const [selectedByGroup, setSelectedByGroup] = useState<Record<string, ProductOptionItem[]>>({});
   const [notes, setNotes] = useState<string>('');
   const [modalError, setModalError] = useState<string | null>(null);
+
+  // Reiniciar automáticamente todos los campos del formulario al abrir o cambiar de plato
+  useEffect(() => {
+    if (product) {
+      setQuantity(1);
+      setSelectedByGroup({});
+      setNotes('');
+      setModalError(null);
+    }
+  }, [product?.id]);
 
   if (!product) return null;
 

@@ -168,6 +168,8 @@ interface AppContextType {
 
   // Menús y Platos (con soporte de Archivado Lógico y Restauración)
   productsByRestaurant: Record<string, Product[]>;
+  fetchProductsForRestaurant: (restaurantId: string) => Promise<Product[]>;
+  isMenuLoading: (restaurantId: string) => boolean;
   addProduct: (restaurantId: string, newProduct: Product) => Promise<MutationResult>;
   updateProduct: (restaurantId: string, updatedProduct: Product) => Promise<MutationResult>;
   deleteProduct: (restaurantId: string, productId: string) => Promise<MutationResult>;
@@ -270,9 +272,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedCategorySlug, setSelectedCategorySlug] = useState<string | null>(null);
   const [onlyOpenFilter, setOnlyOpenFilter] = useState<boolean>(false);
 
-  // Estados reactivos sincronizados con Supabase
+  // Estados reactivos sincronizados con Supabase (con carga bajo demanda de menús)
   const [restaurants, setRestaurants] = useState<Restaurant[]>(INITIAL_RESTAURANTS);
-  const [productsByRestaurant, setProductsByRestaurant] = useState<Record<string, Product[]>>(INITIAL_PRODUCTS);
+  const [productsByRestaurant, setProductsByRestaurant] = useState<Record<string, Product[]>>({});
+  const [loadingMenus, setLoadingMenus] = useState<Record<string, boolean>>({});
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
 
   // Categorías de la ciudad ("¿Qué se te antoja hoy?")
@@ -510,9 +513,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function loadData() {
       try {
-        const [restRes, prodRes, orderRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
+        const [restRes, orderRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
           dataService.getRestaurants(),
-          dataService.getProducts(),
           dataService.getOrders(),
           dataService.getCategories(),
           dataService.getDrivers(),
@@ -521,9 +523,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (restRes.status === 'fulfilled' && restRes.value.data.length > 0) {
           setRestaurants(restRes.value.data);
-        }
-        if (prodRes.status === 'fulfilled' && Object.keys(prodRes.value.data).length > 0) {
-          setProductsByRestaurant(prodRes.value.data);
         }
         if (orderRes.status === 'fulfilled' && orderRes.value.data.length > 0) {
           setOrders(orderRes.value.data);
@@ -756,10 +755,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       lastRevalidation = now;
 
       try {
-        const [ordersRes, restRes, prodRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
+        const [ordersRes, restRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
           dataService.getOrders(),
           dataService.getRestaurants(),
-          dataService.getProducts(),
           dataService.getCategories(),
           dataService.getDrivers(),
           dataService.getPlatformConfig(),
@@ -770,9 +768,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         if (restRes.status === 'fulfilled' && restRes.value.data.length > 0) {
           setRestaurants(restRes.value.data);
-        }
-        if (prodRes.status === 'fulfilled' && Object.keys(prodRes.value.data).length > 0) {
-          setProductsByRestaurant(prodRes.value.data);
         }
         if (catRes.status === 'fulfilled' && catRes.value.data.length > 0) {
           setCategories(catRes.value.data);
@@ -959,6 +954,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         error: e?.message || 'Error de conexión actualizando la disponibilidad del plato.',
       };
     }
+  };
+
+  // Carga bajo demanda y optimizada del menú por restaurante con caché en memoria
+  const fetchProductsForRestaurant = async (restaurantId: string): Promise<Product[]> => {
+    if (!restaurantId) return [];
+
+    // Si ya existe en caché local de memoria y contiene platos, devolver de inmediato sin consumir red
+    const cached = productsByRestaurant[restaurantId];
+    if (cached && cached.length > 0) {
+      return cached;
+    }
+
+    setLoadingMenus((prev) => ({ ...prev, [restaurantId]: true }));
+    try {
+      const res = await dataService.getProductsByRestaurant(restaurantId);
+      const items = res.data || [];
+      setProductsByRestaurant((prev) => ({
+        ...prev,
+        [restaurantId]: items,
+      }));
+      return items;
+    } finally {
+      setLoadingMenus((prev) => ({ ...prev, [restaurantId]: false }));
+    }
+  };
+
+  const isMenuLoading = (restaurantId: string): boolean => {
+    return !!loadingMenus[restaurantId];
   };
 
   // Manejo de pedidos sincronizado con Supabase (validando en servidor existencia, restaurante, archivado, disponibilidad y precio vigente)
@@ -2021,6 +2044,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         toggleDriverStatus,
         toggleDriverAvailability,
         productsByRestaurant,
+        fetchProductsForRestaurant,
+        isMenuLoading,
         addProduct,
         updateProduct,
         deleteProduct,

@@ -403,6 +403,32 @@ export const dataService = {
     }
   },
 
+  async getProductsByRestaurant(restaurantId: string): Promise<{ data: Product[]; error?: any }> {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('restaurant_id', restaurantId)
+        .order('name');
+
+      if (error) {
+        const fallback = (INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived);
+        return { data: fallback, error };
+      }
+
+      if (data && data.length > 0) {
+        const mapped = data.map(dbToProduct).filter((p) => !p.isArchived);
+        return { data: mapped };
+      }
+
+      const fallback = (INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived);
+      return { data: fallback };
+    } catch (err) {
+      const fallback = (INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived);
+      return { data: fallback, error: err };
+    }
+  },
+
   async saveProduct(product: Product, isInsert = false): Promise<MutationResult> {
     const dbRow = productToDb(product);
     try {

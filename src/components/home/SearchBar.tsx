@@ -1,15 +1,13 @@
 'use client';
 
 import React from 'react';
-import { Search, X, SlidersHorizontal } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 
 export default function SearchBar() {
   const {
     searchQuery,
     setSearchQuery,
-    onlyOpenFilter,
-    setOnlyOpenFilter,
     selectedCategorySlug,
     setSelectedCategorySlug,
   } = useApp();
@@ -30,38 +28,28 @@ export default function SearchBar() {
         />
         {searchQuery && (
           <button
+            type="button"
             onClick={() => setSearchQuery('')}
-            className="absolute right-3 p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            className="absolute right-3 p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         )}
       </div>
 
-      {/* Quick filter pills */}
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 text-xs">
-        <button
-          onClick={() => setOnlyOpenFilter(!onlyOpenFilter)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition whitespace-nowrap ${
-            onlyOpenFilter
-              ? 'bg-emerald-600 text-white border-emerald-600 font-semibold shadow-xs'
-              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
-          }`}
-        >
-          <span className={`w-2 h-2 rounded-full ${onlyOpenFilter ? 'bg-white' : 'bg-emerald-500'}`}></span>
-          <span>Abiertos ahora</span>
-        </button>
-
-        {selectedCategorySlug && (
+      {/* Quick filter pills: Solo indicador de categoría seleccionada para removerla */}
+      {selectedCategorySlug && (
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 text-xs">
           <button
+            type="button"
             onClick={() => setSelectedCategorySlug(null)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200 font-medium whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200 font-bold whitespace-nowrap cursor-pointer hover:bg-orange-200 transition"
           >
-            <span>Filtro activo</span>
-            <X className="w-3.5 h-3.5" />
+            <span>Filtro de categoría activo</span>
+            <X className="w-3.5 h-3.5 text-orange-600" />
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
