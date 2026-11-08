@@ -404,6 +404,7 @@ export const dataService = {
   },
 
   async getProductsByRestaurant(restaurantId: string): Promise<{ data: Product[]; error?: any }> {
+    const baseList: Product[] = [...(INITIAL_PRODUCTS[restaurantId] || [])];
     try {
       const { data, error } = await supabase
         .from('products')
@@ -412,20 +413,24 @@ export const dataService = {
         .order('name');
 
       if (error) {
-        const fallback = (INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived);
-        return { data: fallback, error };
+        return { data: baseList, error };
       }
 
       if (data && data.length > 0) {
-        const mapped = data.map(dbToProduct).filter((p) => !p.isArchived);
-        return { data: mapped };
+        data.forEach((row) => {
+          const p = dbToProduct(row);
+          const existingIdx = baseList.findIndex((item) => item.id === p.id);
+          if (existingIdx >= 0) {
+            baseList[existingIdx] = p;
+          } else {
+            baseList.push(p);
+          }
+        });
       }
 
-      const fallback = (INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived);
-      return { data: fallback };
+      return { data: baseList };
     } catch (err) {
-      const fallback = (INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived);
-      return { data: fallback, error: err };
+      return { data: baseList, error: err };
     }
   },
 

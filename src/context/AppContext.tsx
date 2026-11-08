@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   UserRole,
   User,
@@ -272,11 +272,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedCategorySlug, setSelectedCategorySlug] = useState<string | null>(null);
   const [onlyOpenFilter, setOnlyOpenFilter] = useState<boolean>(false);
 
-  // Estados reactivos sincronizados con Supabase y respaldo integral
+  // Estados reactivos sincronizados con Supabase (menús bajo demanda por restaurante)
   const [restaurants, setRestaurants] = useState<Restaurant[]>(INITIAL_RESTAURANTS);
-  const [productsByRestaurant, setProductsByRestaurant] = useState<Record<string, Product[]>>(INITIAL_PRODUCTS);
+  const [productsByRestaurant, setProductsByRestaurant] = useState<Record<string, Product[]>>({});
   const [loadingMenus, setLoadingMenus] = useState<Record<string, boolean>>({});
+  const loadedMenusRef = useRef<Set<string>>(new Set());
+  const inFlightMenusRef = useRef<Record<string, Promise<Product[]> | undefined>>({});
+  const productsByRestaurantRef = useRef<Record<string, Product[]>>({});
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
+
+  useEffect(() => {
+    productsByRestaurantRef.current = productsByRestaurant;
+  }, [productsByRestaurant]);
 
   // Categorías de la ciudad ("¿Qué se te antoja hoy?")
   const [categories, setCategories] = useState<FoodCategory[]>(() => {
@@ -509,13 +516,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Cargar datos iniciales desde la capa de persistencia (Supabase con fallback local)
+  // Cargar datos iniciales desde la capa de persistencia (sin precargar menús de todos los restaurantes)
   useEffect(() => {
     async function loadData() {
       try {
-        const [restRes, prodRes, orderRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
+        const [restRes, orderRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
           dataService.getRestaurants(),
-          dataService.getProducts(),
           dataService.getOrders(),
           dataService.getCategories(),
           dataService.getDrivers(),
@@ -524,13 +530,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (restRes.status === 'fulfilled' && restRes.value.data.length > 0) {
           setRestaurants(restRes.value.data);
-        }
-        if (prodRes.status === 'fulfilled' && Object.keys(prodRes.value.data).length > 0) {
-          setProductsByRestaurant((prev) => ({
-            ...INITIAL_PRODUCTS,
-            ...prev,
-            ...prodRes.value.data,
-          }));
         }
         if (orderRes.status === 'fulfilled' && orderRes.value.data.length > 0) {
           setOrders(orderRes.value.data);
@@ -659,6 +658,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         (payload) => {
           if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
             const p = dbToProduct(payload.new);
+            // Solo actualizar en memoria si el menú de ese restaurante ya fue cargado bajo demanda
+            if (!loadedMenusRef.current.has(p.restaurantId)) return;
             setProductsByRestaurant((prev) => {
               const currentList = prev[p.restaurantId] || [];
               const idx = currentList.findIndex((item) => item.id === p.id);
@@ -763,13 +764,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       lastRevalidation = now;
 
       try {
-        const [ordersRes, restRes, catRes, drvRes, cfgRes, prodRes] = await Promise.allSettled([
+        const [ordersRes, restRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
           dataService.getOrders(),
           dataService.getRestaurants(),
           dataService.getCategories(),
           dataService.getDrivers(),
           dataService.getPlatformConfig(),
-          dataService.getProducts(),
         ]);
 
         if (ordersRes.status === 'fulfilled' && ordersRes.value.data.length > 0) {
@@ -777,13 +777,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         if (restRes.status === 'fulfilled' && restRes.value.data.length > 0) {
           setRestaurants(restRes.value.data);
-        }
-        if (prodRes.status === 'fulfilled' && Object.keys(prodRes.value.data).length > 0) {
-          setProductsByRestaurant((prev) => ({
-            ...INITIAL_PRODUCTS,
-            ...prev,
-            ...prodRes.value.data,
-          }));
         }
         if (catRes.status === 'fulfilled' && catRes.value.data.length > 0) {
           setCategories(catRes.value.data);
@@ -794,6 +787,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (cfgRes.status === 'fulfilled') {
           setGlobalDeliveryFeeState(cfgRes.value.config.globalDeliveryFee);
           setGlobalAnnouncementState(cfgRes.value.config.globalAnnouncement);
+        }
+
+        // Revalidar únicamente los menús de restaurantes que el usuario ya abrió en esta sesión
+        const loadedIds = Array.from(loadedMenusRef.current);
+        if (loadedIds.length > 0) {
+          const menuResults = await Promise.allSettled(
+            loadedIds.map(async (restId) => ({
+              restId,
+              res: await dataService.getProductsByRestaurant(restId),
+            }))
+          );
+          setProductsByRestaurant((prev) => {
+            const next = { ...prev };
+            menuResults.forEach((item) => {
+              if (item.status === 'fulfilled') {
+                next[item.value.restId] = item.value.res.data;
+              }
+            });
+            return next;
+          });
         }
       } catch (err) {
         console.warn('Revalidación throttled falló en segundo plano:', err);
@@ -973,39 +986,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Carga bajo demanda y optimizada del menú por restaurante con caché en memoria
-  const fetchProductsForRestaurant = async (restaurantId: string): Promise<Product[]> => {
+  const fetchProductsForRestaurant = useCallback(async (restaurantId: string): Promise<Product[]> => {
     if (!restaurantId) return [];
 
-    // Si ya existe en caché local de memoria y contiene platos, devolver de inmediato sin consumir red
-    const cached = productsByRestaurant[restaurantId];
-    if (cached && cached.length > 0) {
-      return cached;
+    // Si el menú de este restaurante ya fue cargado en esta sesión, devolver de inmediato desde caché en memoria
+    if (loadedMenusRef.current.has(restaurantId) && productsByRestaurantRef.current[restaurantId]) {
+      return productsByRestaurantRef.current[restaurantId];
     }
 
-    const fallbackItems = (INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived);
+    // Si ya hay una solicitud en vuelo para este restaurante, reutilizar la misma promesa
+    const existingRequest = inFlightMenusRef.current[restaurantId];
+    if (existingRequest !== undefined) {
+      return existingRequest;
+    }
+
     setLoadingMenus((prev) => ({ ...prev, [restaurantId]: true }));
-    try {
-      const res = await dataService.getProductsByRestaurant(restaurantId);
-      const items = res.data && res.data.length > 0 ? res.data : fallbackItems;
-      setProductsByRestaurant((prev) => ({
-        ...prev,
-        [restaurantId]: items,
-      }));
-      return items;
-    } catch {
-      setProductsByRestaurant((prev) => ({
-        ...prev,
-        [restaurantId]: fallbackItems,
-      }));
-      return fallbackItems;
-    } finally {
-      setLoadingMenus((prev) => ({ ...prev, [restaurantId]: false }));
-    }
-  };
 
-  const isMenuLoading = (restaurantId: string): boolean => {
-    return !!loadingMenus[restaurantId];
-  };
+    const requestPromise = (async () => {
+      try {
+        const res = await dataService.getProductsByRestaurant(restaurantId);
+        const items = res.data || [];
+        loadedMenusRef.current.add(restaurantId);
+        productsByRestaurantRef.current = {
+          ...productsByRestaurantRef.current,
+          [restaurantId]: items,
+        };
+        setProductsByRestaurant((prev) => ({
+          ...prev,
+          [restaurantId]: items,
+        }));
+        return items;
+      } finally {
+        delete inFlightMenusRef.current[restaurantId];
+        setLoadingMenus((prev) => ({ ...prev, [restaurantId]: false }));
+      }
+    })();
+
+    inFlightMenusRef.current[restaurantId] = requestPromise;
+    return requestPromise;
+  }, []);
+
+  // Si existe una canasta activa de un restaurante específico, cargar únicamente ese menú bajo demanda
+  useEffect(() => {
+    if (cartRestaurantId) {
+      fetchProductsForRestaurant(cartRestaurantId);
+    }
+  }, [cartRestaurantId, fetchProductsForRestaurant]);
+
+  const isMenuLoading = useCallback(
+    (restaurantId: string): boolean => {
+      return !!loadingMenus[restaurantId];
+    },
+    [loadingMenus]
+  );
 
   // Manejo de pedidos sincronizado con Supabase (validando en servidor existencia, restaurante, archivado, disponibilidad y precio vigente)
   const addOrder = async (newOrder: Order): Promise<boolean> => {

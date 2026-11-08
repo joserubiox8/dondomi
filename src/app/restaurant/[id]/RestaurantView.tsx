@@ -14,14 +14,13 @@ import { Product } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
 import ProductModal from '@/components/restaurant/ProductModal';
-import { PRODUCTS_BY_RESTAURANT as INITIAL_PRODUCTS } from '@/data/mockData';
 
 interface RestaurantViewProps {
   restaurantId: string;
 }
 
 export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
-  const { restaurants, productsByRestaurant } = useApp();
+  const { restaurants, productsByRestaurant, fetchProductsForRestaurant, isMenuLoading } = useApp();
   const [selectedCategory, setSelectedCategory] = useState<string>('TODOS');
   const [activeModalProduct, setActiveModalProduct] = useState<Product | null>(null);
   const [scrollY, setScrollY] = useState<number>(0);
@@ -36,12 +35,20 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // Carga bajo demanda (On-Demand) del menú exclusivo de este restaurante
+  useEffect(() => {
+    fetchProductsForRestaurant(restaurantId);
+  }, [restaurantId, fetchProductsForRestaurant]);
+
   // Buscar restaurante en el estado dinámico
   const restaurant = restaurants.find((r) => r.id === restaurantId);
 
+  const hasMenuInMemory = productsByRestaurant[restaurantId] !== undefined;
+  const isLoading = isMenuLoading(restaurantId) || !hasMenuInMemory;
+
   // Obtener únicamente productos activos (no archivados) propios de este restaurante
   const products = useMemo(
-    () => (productsByRestaurant[restaurantId] || INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived),
+    () => (productsByRestaurant[restaurantId] || []).filter((p) => !p.isArchived),
     [productsByRestaurant, restaurantId]
   );
 
@@ -259,12 +266,29 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
               Platos y Combos
             </h3>
             <span className="text-xs text-slate-500 font-semibold">
-              {filteredProducts.length} disponibles
+              {isLoading ? 'Cargando menú...' : `${filteredProducts.length} disponibles`}
             </span>
           </div>
 
           <div className="space-y-3.5">
-            {filteredProducts.length === 0 ? (
+            {isLoading ? (
+              [1, 2, 3].map((item) => (
+                <div
+                  key={item}
+                  className="bg-white rounded-3xl p-5 border-2 border-slate-200 flex flex-col justify-between gap-3.5 animate-pulse"
+                >
+                  <div className="space-y-2">
+                    <div className="h-4 bg-slate-200 rounded-lg w-3/5" />
+                    <div className="h-3 bg-slate-100 rounded-md w-full" />
+                    <div className="h-3 bg-slate-100 rounded-md w-4/5" />
+                  </div>
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <div className="h-5 bg-slate-200 rounded-lg w-24" />
+                    <div className="h-8 bg-slate-200 rounded-xl w-24" />
+                  </div>
+                </div>
+              ))
+            ) : filteredProducts.length === 0 ? (
               <div className="bg-white rounded-3xl p-8 text-center border border-slate-200 space-y-2">
                 <p className="font-bold text-slate-800 text-sm">
                   Este restaurante está actualizando su carta

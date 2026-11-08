@@ -86,12 +86,15 @@ Este archivo actúa como bitácora viva de mejoras, optimizaciones y ajustes ide
   4. Barra fija de categorías en negro (`bg-slate-950`) con píldoras de navegación.
 * **Estado**: ✅ **Completado** (2026-11-08).
 
-### ✅ Item 3.3: Respaldo Íntegro de Platos y Menús Completos sin Omisiones
+### ✅ Item 3.3: Carga Bajo Demanda Real + Fusión Individual de Carta por Restaurante
 * **Ubicación**: `src/context/AppContext.tsx`, `src/services/dataService.ts` y `src/app/restaurant/[id]/RestaurantView.tsx`.
-* **Problema resuelto**: Al entrar a un restaurante cargaba menos platos o quedaba en blanco debido a discrepancias entre la base de datos en nube y el catálogo integral inicial.
+* **Problema resuelto**:
+  1. Antes, `getProductsByRestaurant(restaurantId)` reemplazaba por completo el menú base del restaurante si encontraba 1 solo plato (o 1 plato archivado) en Supabase, causando que se vieran menos platos o que la carta saliera en blanco.
+  2. Además, `fetchProductsForRestaurant` no estaba memoizado con `useCallback`, provocando re-ejecuciones del `useEffect` al cambiar el estado de carga.
 * **Solución implementada**:
-  1. Se unificó el estado inicial de `productsByRestaurant` con `INITIAL_PRODUCTS`, combinando transparentemente las adiciones de Supabase sin anular los menús ricos existentes.
-  2. En `fetchProductsForRestaurant` y `RestaurantView.tsx` se garantizó fallback bidireccional a los platos activos de cada restaurante.
+  1. La página de inicio (`/`) arranca con `productsByRestaurant = {}` y **no** descarga los menús de todos los restaurantes.
+  2. Al entrar a un restaurante, `fetchProductsForRestaurant(restaurantId)` (estabilizado con `useCallback`, `loadedMenusRef` e `inFlightMenusRef`) solicita **únicamente** los platos de ese comercio.
+  3. En `dataService.getProductsByRestaurant(restaurantId)` se fusionan los platos de ese restaurante en Supabase sobre su base individual (`INITIAL_PRODUCTS[restaurantId]`), garantizando que jamás falten platos ni aparezcan cartas vacías.
 * **Estado**: ✅ **Completado** (2026-11-08).
 
 ### ✅ Item 1.3: Carga Inmediata y Persistente de Imágenes al Retroceder (Back Navigation)
