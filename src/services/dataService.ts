@@ -25,6 +25,10 @@ import {
   Order,
   OrderStatus,
   MutationResult,
+  LoyaltyTier,
+  LoyaltyTierInfo,
+  OrderChannel,
+  TransferPlatform,
 } from '@/types';
 import {
   FOOD_CATEGORIES,
@@ -523,6 +527,12 @@ export const dataService = {
           deliveryFleet: parsed.deliveryFleet,
           rating: parsed.rating,
           reviewComment: parsed.reviewComment,
+          orderChannel: row.order_channel || parsed.orderChannel || 'delivery_app',
+          tableNumber: row.table_number || parsed.tableNumber || undefined,
+          isSplitPayment: Boolean(row.is_split_payment ?? parsed.isSplitPayment ?? false),
+          cashAmount: row.cash_amount != null ? Number(row.cash_amount) : (parsed.cashAmount ?? 0),
+          transferAmount: row.transfer_amount != null ? Number(row.transfer_amount) : (parsed.transferAmount ?? 0),
+          transferPlatform: row.transfer_platform || parsed.transferPlatform || undefined,
         };
       });
 
@@ -532,6 +542,88 @@ export const dataService = {
     }
   },
 };
+
+/**
+ * Calcula en tiempo real el nivel de fidelización VIP de un cliente según
+ * su historial de pedidos entregados ('DELIVERED').
+ *
+ * Niveles oficiales DonDomi:
+ * - Bronce: 1 a 3 pedidos.
+ * - Plata: 4 a 9 pedidos.
+ * - Oro: 10 a 19 pedidos.
+ * - VIP: 20 o más pedidos.
+ */
+export function getCustomerLoyaltyTier(phone: string, allOrders: Order[]): LoyaltyTierInfo {
+  const cleanPhone = (phone || '').replace(/\D/g, '');
+  if (!cleanPhone || cleanPhone === '0000000000') {
+    return {
+      tier: 'Nuevo',
+      deliveredOrdersCount: 0,
+      label: 'Mostrador / Nuevo',
+      badgeClass: 'bg-slate-100 text-slate-600 border-slate-200',
+      icon: '👤',
+    };
+  }
+
+  const deliveredOrdersCount = allOrders.filter((o) => {
+    const oPhone = (o.customerPhone || '').replace(/\D/g, '');
+    return oPhone === cleanPhone && o.status === 'DELIVERED';
+  }).length;
+
+  if (deliveredOrdersCount >= 20) {
+    return {
+      tier: 'VIP',
+      deliveredOrdersCount,
+      orderCount: deliveredOrdersCount,
+      label: 'VIP',
+      badgeClass: 'bg-purple-100 text-purple-800 border-purple-300 ring-1 ring-purple-400 font-black',
+      icon: '👑',
+      discountMessage: '🌟 Cliente VIP de Valledupar · Atención prioritaria',
+    };
+  }
+  if (deliveredOrdersCount >= 10) {
+    return {
+      tier: 'Oro',
+      deliveredOrdersCount,
+      orderCount: deliveredOrdersCount,
+      label: 'Oro',
+      badgeClass: 'bg-amber-100 text-amber-800 border-amber-300 ring-1 ring-amber-400 font-bold',
+      icon: '🥇',
+      discountMessage: '🥇 Cliente Frecuente Oro · Trato preferencial',
+    };
+  }
+  if (deliveredOrdersCount >= 4) {
+    return {
+      tier: 'Plata',
+      deliveredOrdersCount,
+      orderCount: deliveredOrdersCount,
+      label: 'Plata',
+      badgeClass: 'bg-slate-200 text-slate-800 border-slate-300 ring-1 ring-slate-400 font-semibold',
+      icon: '🥈',
+      discountMessage: '🥈 Cliente Habitual Plata',
+    };
+  }
+  if (deliveredOrdersCount >= 1) {
+    return {
+      tier: 'Bronce',
+      deliveredOrdersCount,
+      orderCount: deliveredOrdersCount,
+      label: 'Bronce',
+      badgeClass: 'bg-orange-100 text-orange-800 border-orange-200 ring-1 ring-orange-300 font-semibold',
+      icon: '🥉',
+      discountMessage: '🥉 Cliente Bronce',
+    };
+  }
+
+  return {
+    tier: 'Nuevo',
+    deliveredOrdersCount: 0,
+    orderCount: 0,
+    label: 'Nuevo Cliente',
+    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 font-medium',
+    icon: '✨',
+  };
+}
 
 // ============================================================================
 // HELPERS LOCALES DE FALLBACK Y CACHÉ DE RECUPERACIÓN

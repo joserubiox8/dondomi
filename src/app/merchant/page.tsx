@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import {
   ChefHat,
@@ -28,14 +28,24 @@ import {
   Sliders,
   Star,
   FolderPlus,
+  Monitor,
+  ShoppingBag,
+  CreditCard,
+  Coins,
+  Share2,
+  Minus,
+  Receipt,
+  Sparkles,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
 import {
   filterOrdersByPeriod,
   calculateRestaurantSettlement,
+  generateWhatsAppSettlementMessage,
   SettlementPeriod,
 } from '@/lib/pricing';
+import { getCustomerLoyaltyTier } from '@/services/dataService';
 import { playOrderAlertSound } from '@/lib/sound';
 import {
   Order,
@@ -43,9 +53,12 @@ import {
   ProductOptionGroup,
   ProductOptionItem,
   Restaurant,
+  OrderChannel,
+  TransferPlatform,
+  SelectedOption,
 } from '@/types';
 
-type MerchantTab = 'KDS' | 'MENU' | 'HORARIOS' | 'VENTAS';
+type MerchantTab = 'KDS' | 'POS' | 'MENU' | 'HORARIOS' | 'VENTAS';
 type KdsFilter = 'ACTIVOS' | 'NUEVOS' | 'EN_COCINA' | 'EN_RUTA' | 'ENTREGADOS' | 'CANCELADOS';
 
 export default function MerchantPage() {
@@ -67,6 +80,7 @@ export default function MerchantPage() {
     currentUser,
     loginWithEmail,
     logout,
+    addOrder,
   } = useApp();
 
   // Estado para autenticación individual de tienda en modo producción
@@ -142,6 +156,45 @@ export default function MerchantPage() {
     setNoticeMessage(msg);
     setTimeout(() => setNoticeMessage(null), 3500);
   };
+
+  // ============================================================================
+  // ESTADOS DEL MÓDULO PUNTO DE VENTA (POS) INTEGRADO
+  // ============================================================================
+  interface PosCartItem {
+    id: string;
+    product: Product;
+    quantity: number;
+    selectedOptions: SelectedOption[];
+    notes?: string;
+    itemTotal: number;
+  }
+
+  const [posSearch, setPosSearch] = useState<string>('');
+  const [posCategoryFilter, setPosCategoryFilter] = useState<string>('TODAS');
+  const [posCart, setPosCart] = useState<PosCartItem[]>([]);
+  const [posChannel, setPosChannel] = useState<OrderChannel>('pos_local');
+  const [posTableNumber, setPosTableNumber] = useState<string>('Mesa 1');
+  const [posCustomerPhone, setPosCustomerPhone] = useState<string>('');
+  const [posCustomerName, setPosCustomerName] = useState<string>('');
+  const [posDeliveryAddress, setPosDeliveryAddress] = useState<string>('');
+  const [posDeliveryNeighborhood, setPosDeliveryNeighborhood] = useState<string>('Centro');
+  const [posPaymentType, setPosPaymentType] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'DIVIDIDO'>('EFECTIVO');
+  const [posTransferPlatform, setPosTransferPlatform] = useState<TransferPlatform>('Nequi');
+  const [posCashTendered, setPosCashTendered] = useState<string>('');
+  const [posSplitCash, setPosSplitCash] = useState<string>('');
+  const [posSplitTransfer, setPosSplitTransfer] = useState<string>('');
+  const [posSubmitting, setPosSubmitting] = useState<boolean>(false);
+  const [posError, setPosError] = useState<string | null>(null);
+
+  // Modal para seleccionar opciones de plato en POS
+  const [posOptionProduct, setPosOptionProduct] = useState<Product | null>(null);
+  const [posSelectedOptionsByGroup, setPosSelectedOptionsByGroup] = useState<Record<string, ProductOptionItem[]>>({});
+  const [posOptionQty, setPosOptionQty] = useState<number>(1);
+  const [posOptionNotes, setPosOptionNotes] = useState<string>('');
+  const [posOptionModalError, setPosOptionModalError] = useState<string | null>(null);
+
+  // Modal de confirmación de cobro POS exitoso
+  const [posSuccessOrder, setPosSuccessOrder] = useState<Order | null>(null);
 
   const handleOpenRejectModal = (order: Order) => {
     setRejectingOrder(order);
@@ -717,6 +770,290 @@ export default function MerchantPage() {
   const periodOrders = filterOrdersByPeriod(restaurantOrders, salesPeriod);
   const settlement = calculateRestaurantSettlement(periodOrders, restaurant.commissionRate || 0);
 
+  // ============================================================================
+  // LÓGICA Y HANDLERS DEL MÓDULO PUNTO DE VENTA (POS)
+  // ============================================================================
+  const filteredPosProducts = useMemo(() => {
+    return products.filter((p) => {
+      const matchesCat = posCategoryFilter === 'TODAS' || p.categoryName === posCategoryFilter;
+      const q = posSearch.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        p.categoryName.toLowerCase().includes(q);
+      return matchesCat && matchesSearch;
+    });
+  }, [products, posCategoryFilter, posSearch]);
+
+  const handlePosPhoneChange = (val: string) => {
+    setPosError(null);
+    const clean = val.replace(/\D/g, '').slice(0, 10);
+    setPosCustomerPhone(clean);
+
+    if (clean.length === 10) {
+      if (clean === '0000000000') {
+        if (!posCustomerName || posCustomerName === '') {
+          setPosCustomerName('Cliente Mostrador');
+        }
+      } else {
+        const found = orders.find(
+          (o) => (o.customerPhone || '').replace(/\D/g, '') === clean && o.customerName
+        );
+        if (found && (!posCustomerName || posCustomerName === 'Cliente Mostrador' || posCustomerName === '')) {
+          setPosCustomerName(found.customerName);
+        }
+      }
+    }
+  };
+
+  const handleSetExpressCustomer = () => {
+    setPosCustomerPhone('0000000000');
+    setPosCustomerName('Cliente Mostrador');
+    setPosError(null);
+  };
+
+  const currentPosLoyalty = useMemo(() => {
+    return getCustomerLoyaltyTier(posCustomerPhone, orders);
+  }, [posCustomerPhone, orders]);
+
+  const posCartSubtotal = useMemo(() => {
+    return posCart.reduce((acc, item) => acc + item.itemTotal, 0);
+  }, [posCart]);
+
+  const posDeliveryFee = posChannel === 'delivery_app' ? 7000 : 0;
+  const posTotal = posCartSubtotal + posDeliveryFee;
+
+  const handleAddDirectToPos = (prod: Product) => {
+    if (!prod.isAvailable) return;
+    if (prod.options && prod.options.length > 0) {
+      setPosOptionProduct(prod);
+      setPosSelectedOptionsByGroup({});
+      setPosOptionQty(1);
+      setPosOptionNotes('');
+      setPosOptionModalError(null);
+      return;
+    }
+
+    setPosCart((prev) => {
+      const idx = prev.findIndex(
+        (it) => it.product.id === prod.id && (!it.selectedOptions || it.selectedOptions.length === 0) && !it.notes
+      );
+      if (idx >= 0) {
+        const next = [...prev];
+        const nextQty = next[idx].quantity + 1;
+        next[idx] = {
+          ...next[idx],
+          quantity: nextQty,
+          itemTotal: prod.price * nextQty,
+        };
+        return next;
+      }
+      return [
+        ...prev,
+        {
+          id: `pos-it-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          product: prod,
+          quantity: 1,
+          selectedOptions: [],
+          notes: '',
+          itemTotal: prod.price,
+        },
+      ];
+    });
+  };
+
+  const handleConfirmAddOptionProduct = () => {
+    if (!posOptionProduct) return;
+    setPosOptionModalError(null);
+
+    // Validar selecciones mínimas requeridas
+    if (posOptionProduct.options) {
+      for (const grp of posOptionProduct.options) {
+        const selected = posSelectedOptionsByGroup[grp.id] || [];
+        if (grp.required && selected.length < (grp.minSelect || 1)) {
+          setPosOptionModalError(`Selecciona al menos ${grp.minSelect || 1} opción en "${grp.name}".`);
+          return;
+        }
+      }
+    }
+
+    const flatOptions: SelectedOption[] = [];
+    let addPrice = 0;
+    Object.entries(posSelectedOptionsByGroup).forEach(([grpId, items]) => {
+      const grp = posOptionProduct.options?.find((g) => g.id === grpId);
+      const grpName = grp?.name || 'Opciones';
+      items.forEach((it) => {
+        flatOptions.push({
+          groupName: grpName,
+          itemName: it.name,
+          price: it.additionalPrice,
+        });
+        addPrice += it.additionalPrice;
+      });
+    });
+
+    const unitPrice = posOptionProduct.price + addPrice;
+    const itemTotal = unitPrice * posOptionQty;
+
+    setPosCart((prev) => [
+      ...prev,
+      {
+        id: `pos-it-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        product: posOptionProduct,
+        quantity: posOptionQty,
+        selectedOptions: flatOptions,
+        notes: posOptionNotes.trim(),
+        itemTotal,
+      },
+    ]);
+
+    setPosOptionProduct(null);
+  };
+
+  const handleUpdatePosQty = (itemId: string, delta: number) => {
+    setPosCart((prev) => {
+      return prev
+        .map((it) => {
+          if (it.id !== itemId) return it;
+          const nextQty = it.quantity + delta;
+          if (nextQty <= 0) return null;
+          const unitPrice = it.itemTotal / it.quantity;
+          return {
+            ...it,
+            quantity: nextQty,
+            itemTotal: unitPrice * nextQty,
+          };
+        })
+        .filter(Boolean) as PosCartItem[];
+    });
+  };
+
+  const handleRemovePosItem = (itemId: string) => {
+    setPosCart((prev) => prev.filter((it) => it.id !== itemId));
+  };
+
+  const handleChargePosOrder = async () => {
+    setPosError(null);
+    if (posCart.length === 0) {
+      setPosError('La comanda está vacía. Selecciona al menos un plato.');
+      return;
+    }
+    const cleanPhone = posCustomerPhone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      setPosError('El celular debe tener 10 dígitos numéricos (ej. 3001234567 o usa "Mostrador Express: 0000000000").');
+      return;
+    }
+    const custName = posCustomerName.trim() || (cleanPhone === '0000000000' ? 'Cliente Mostrador' : 'Cliente Local');
+    if (posChannel === 'pos_local' && !posTableNumber.trim()) {
+      setPosError('Ingresa el número o nombre de la mesa (ej. Mesa 1, Mesa 4, Barra).');
+      return;
+    }
+    if (posChannel === 'delivery_app' && !posDeliveryAddress.trim()) {
+      setPosError('Ingresa la dirección para el domicilio en Valledupar.');
+      return;
+    }
+
+    let isSplit = false;
+    let cashAmt = 0;
+    let transferAmt = 0;
+    let paymentMethod: any = 'EFECTIVO';
+    let tPlatform: TransferPlatform | undefined = undefined;
+
+    if (posPaymentType === 'EFECTIVO') {
+      cashAmt = posTotal;
+      paymentMethod = 'EFECTIVO';
+    } else if (posPaymentType === 'TRANSFERENCIA') {
+      transferAmt = posTotal;
+      paymentMethod = 'TRANSFERENCIA';
+      tPlatform = posTransferPlatform;
+    } else {
+      isSplit = true;
+      cashAmt = Number(posSplitCash) || 0;
+      transferAmt = Number(posSplitTransfer) || 0;
+      tPlatform = posTransferPlatform;
+      paymentMethod = 'DIVIDIDO';
+
+      if (cashAmt + transferAmt !== posTotal) {
+        setPosError(
+          `La suma de efectivo ($${cashAmt.toLocaleString('es-CO')}) + transferencia ($${transferAmt.toLocaleString('es-CO')}) debe ser exactamente igual al total ($${posTotal.toLocaleString('es-CO')}).`
+        );
+        return;
+      }
+    }
+
+    setPosSubmitting(true);
+    try {
+      const orderItems = posCart.map((c) => ({
+        id: `it-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        productId: c.product.id,
+        productName: c.product.name,
+        quantity: c.quantity,
+        unitPrice: c.product.price,
+        selectedOptions: c.selectedOptions,
+        notes: c.notes || undefined,
+        subtotal: c.itemTotal,
+      }));
+
+      const orderNumber = `DD-${Math.floor(1000 + Math.random() * 9000)}`;
+      const newOrderId = `ord-pos-${Date.now()}`;
+
+      const newOrder: Order = {
+        id: newOrderId,
+        orderNumber,
+        customerId: cleanPhone,
+        customerName: custName,
+        customerPhone: cleanPhone,
+        restaurantId: restaurant.id,
+        restaurantName: restaurant.name,
+        status: 'PREPARING',
+        items: orderItems,
+        subtotal: posCartSubtotal,
+        deliveryFee: posDeliveryFee,
+        serviceFee: 0,
+        total: posTotal,
+        paymentMethod,
+        paymentStatus: 'COMPLETED',
+        deliveryAddress: {
+          id: `addr-${Date.now()}`,
+          label:
+            posChannel === 'pos_local'
+              ? `En Mesa (${posTableNumber.trim()})`
+              : posChannel === 'pos_takeout'
+              ? 'Para Llevar'
+              : 'Domicilio DonDomi',
+          street: posChannel === 'delivery_app' ? posDeliveryAddress.trim() : (restaurant.address || 'Valledupar, Cesar'),
+          neighborhood: posChannel === 'delivery_app' ? posDeliveryNeighborhood.trim() : (restaurant.neighborhood || 'Centro'),
+          city: 'Valledupar',
+        },
+        customerNotes: posChannel === 'pos_local' ? `Servicio en ${posTableNumber.trim()}` : undefined,
+        createdAt: new Date().toISOString(),
+        orderChannel: posChannel,
+        tableNumber: posChannel === 'pos_local' ? posTableNumber.trim() : undefined,
+        isSplitPayment: isSplit,
+        cashAmount: cashAmt,
+        transferAmount: transferAmt,
+        transferPlatform: tPlatform,
+      };
+
+      await addOrder(newOrder);
+
+      setPosSuccessOrder(newOrder);
+      setPosCart([]);
+      setPosCustomerPhone('');
+      setPosCustomerName('');
+      setPosCashTendered('');
+      setPosSplitCash('');
+      setPosSplitTransfer('');
+      setPosDeliveryAddress('');
+      showNotice(`✅ ¡Venta POS #${orderNumber} cobrada y enviada a cocina!`);
+    } catch (err: any) {
+      setPosError(err?.message || 'Error guardando pedido en Supabase.');
+    } finally {
+      setPosSubmitting(false);
+    }
+  };
+
   if (!isMerchantAuthenticated) {
     return (
       <div className="min-h-screen bg-slate-900 text-white flex flex-col justify-between p-4 sm:p-6 selection:bg-amber-500 selection:text-slate-950">
@@ -875,7 +1212,7 @@ export default function MerchantPage() {
       {/* Main Container */}
       <main className="max-w-5xl mx-auto px-4 py-4 space-y-4 print:hidden">
         {/* Navigation Tabs */}
-        <div className="bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-4 gap-1 text-xs font-bold">
+        <div className="bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-2 sm:grid-cols-5 gap-1 text-xs font-bold">
           <button
             onClick={() => setActiveTab('KDS')}
             className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
@@ -886,6 +1223,18 @@ export default function MerchantPage() {
           >
             <ChefHat className="w-4 h-4" />
             <span>Comandas ({pendingOrders.length + preparingOrders.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('POS')}
+            className={`py-2 px-1 rounded-xl transition flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
+              activeTab === 'POS'
+                ? 'bg-orange-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Monitor className="w-4 h-4" />
+            <span>🖥️ Caja POS</span>
           </button>
 
           <button
@@ -1055,6 +1404,8 @@ export default function MerchantPage() {
                     const isDelivered = order.status === 'DELIVERED';
                     const isCancelled = order.status === 'CANCELLED';
                     const isDigitalTransfer = order.paymentMethod !== 'EFECTIVO';
+                    const isPosOrder = order.orderChannel === 'pos_local' || order.orderChannel === 'pos_takeout';
+                    const orderLoyalty = getCustomerLoyaltyTier(order.customerPhone, orders);
 
                     return (
                       <div
@@ -1070,6 +1421,36 @@ export default function MerchantPage() {
                         <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-black text-slate-900 text-base">{order.orderNumber}</span>
+
+                            {/* Badge de Canal */}
+                            {order.orderChannel === 'pos_local' ? (
+                              <span className="bg-purple-100 text-purple-900 border border-purple-200 px-2 py-0.5 rounded-lg text-xs font-black flex items-center gap-1">
+                                <span>🍽️</span>
+                                <span>{order.tableNumber || 'En Mesa'}</span>
+                              </span>
+                            ) : order.orderChannel === 'pos_takeout' ? (
+                              <span className="bg-amber-100 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-lg text-xs font-black flex items-center gap-1">
+                                <span>🛍️</span>
+                                <span>Para Llevar</span>
+                              </span>
+                            ) : (
+                              <span className="bg-blue-100 text-blue-900 border border-blue-200 px-2 py-0.5 rounded-lg text-xs font-black flex items-center gap-1">
+                                <span>🛵</span>
+                                <span>Domicilio App</span>
+                              </span>
+                            )}
+
+                            {/* Insignia Fidelización VIP */}
+                            {orderLoyalty && (
+                              <span
+                                className={`px-2 py-0.5 rounded-lg text-[11px] font-black border flex items-center gap-1 ${orderLoyalty.badgeClass}`}
+                                title={`Cliente ${orderLoyalty.tier} con ${orderLoyalty.orderCount} pedidos entregados`}
+                              >
+                                <span>{orderLoyalty.icon}</span>
+                                <span>{orderLoyalty.tier}</span>
+                              </span>
+                            )}
+
                             <span className="text-xs text-slate-400">•</span>
                             <span className="text-xs font-bold text-slate-700">
                               Cliente: {order.customerName}
@@ -1151,15 +1532,21 @@ export default function MerchantPage() {
                           </span>
 
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
-                                order.paymentMethod === 'EFECTIVO'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-blue-100 text-blue-800'
-                              }`}
-                            >
-                              Pago: {order.paymentMethod}
-                            </span>
+                            {order.isSplitPayment ? (
+                              <span className="bg-indigo-100 text-indigo-900 border border-indigo-200 px-2 py-0.5 rounded-md font-bold text-[11px]">
+                                💳 Pago Mixto: Efec. {formatCOP(order.cashAmount || 0)} + {order.transferPlatform || 'Transf.'} {formatCOP(order.transferAmount || 0)}
+                              </span>
+                            ) : (
+                              <span
+                                className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
+                                  order.paymentMethod === 'EFECTIVO'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-blue-100 text-blue-800'
+                                }`}
+                              >
+                                Pago: {order.paymentMethod === 'TRANSFERENCIA' && order.transferPlatform ? `📲 ${order.transferPlatform}` : order.paymentMethod}
+                              </span>
+                            )}
 
                             {isDigitalTransfer && (
                               <span
@@ -1217,58 +1604,101 @@ export default function MerchantPage() {
 
                           {isPreparing && (
                             <div className="flex-1 flex flex-wrap gap-2">
-                              <button
-                                onClick={() => updateOrderStatus(order.id, 'READY_FOR_PICKUP')}
-                                className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-black py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
-                              >
-                                <PackageCheck className="w-4 h-4" />
-                                <span>
-                                  {order.driverName
-                                    ? `Empacado · Avisar a ${order.driverName}`
-                                    : 'Empacado · Solicitar Repartidor DonDomi'}
-                                </span>
-                              </button>
-                              <button
-                                onClick={async () => {
-                                  await dispatchWithOwnDriver(order.id);
-                                  showNotice(`🛵 Pedido ${order.orderNumber} despachado con domiciliario propio`);
-                                }}
-                                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
-                              >
-                                <Bike className="w-4 h-4" />
-                                <span>Despachar con Domiciliario Propio</span>
-                              </button>
+                              {isPosOrder ? (
+                                <>
+                                  <button
+                                    onClick={() => updateOrderStatus(order.id, 'DELIVERED')}
+                                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                                  >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>
+                                      {order.orderChannel === 'pos_local' ? `Servir en ${order.tableNumber || 'Mesa'}` : 'Entregar al Cliente'}
+                                    </span>
+                                  </button>
+                                  <button
+                                    onClick={() => updateOrderStatus(order.id, 'READY_FOR_PICKUP')}
+                                    className="bg-amber-600 hover:bg-amber-500 text-white font-black py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                                  >
+                                    <PackageCheck className="w-4 h-4" />
+                                    <span>Listo en Barra</span>
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => updateOrderStatus(order.id, 'READY_FOR_PICKUP')}
+                                    className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-black py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                                  >
+                                    <PackageCheck className="w-4 h-4" />
+                                    <span>
+                                      {order.driverName
+                                        ? `Empacado · Avisar a ${order.driverName}`
+                                        : 'Empacado · Solicitar Repartidor DonDomi'}
+                                    </span>
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      await dispatchWithOwnDriver(order.id);
+                                      showNotice(`🛵 Pedido ${order.orderNumber} despachado con domiciliario propio`);
+                                    }}
+                                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                                  >
+                                    <Bike className="w-4 h-4" />
+                                    <span>Despachar con Domiciliario Propio</span>
+                                  </button>
+                                </>
+                              )}
                             </div>
                           )}
 
                           {isReady && (
                             <div className="flex-1 flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
                               <div className="text-xs text-amber-900">
-                                <span className="font-bold block">Listo para recogida en mostrador</span>
+                                <span className="font-bold block">
+                                  {order.orderChannel === 'pos_local'
+                                    ? `Listo para servir en ${order.tableNumber || 'Mesa'}`
+                                    : order.orderChannel === 'pos_takeout'
+                                    ? 'Listo para entrega en mostrador'
+                                    : 'Listo para recogida en mostrador'}
+                                </span>
                                 <span className="text-[11px] text-amber-700">
-                                  {order.driverName
+                                  {order.orderChannel === 'pos_local' || order.orderChannel === 'pos_takeout'
+                                    ? 'Comida emplatada o empacada esperando ser servida al comensal.'
+                                    : order.driverName
                                     ? `Repartidor DonDomi asignado: ${order.driverName} (en camino al restaurante)`
                                     : 'Visible en el radar de domiciliarios DonDomi'}
                                 </span>
                               </div>
                               <div className="flex items-center gap-2">
-                                {!order.driverId && (
+                                {order.orderChannel === 'pos_local' || order.orderChannel === 'pos_takeout' ? (
                                   <button
-                                    onClick={async () => {
-                                      await dispatchWithOwnDriver(order.id);
-                                      showNotice(`🛵 Pedido ${order.orderNumber} despachado con domiciliario propio`);
-                                    }}
-                                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition cursor-pointer"
+                                    onClick={() => updateOrderStatus(order.id, 'DELIVERED')}
+                                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2 px-4 rounded-xl text-xs transition shadow-md cursor-pointer flex items-center gap-1.5"
                                   >
-                                    Llevar con Domi Propio
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>Marcar Entregado</span>
                                   </button>
+                                ) : (
+                                  <>
+                                    {!order.driverId && (
+                                      <button
+                                        onClick={async () => {
+                                          await dispatchWithOwnDriver(order.id);
+                                          showNotice(`🛵 Pedido ${order.orderNumber} despachado con domiciliario propio`);
+                                        }}
+                                        className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition cursor-pointer"
+                                      >
+                                        Llevar con Domi Propio
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => updateOrderStatus(order.id, 'ON_THE_WAY')}
+                                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition cursor-pointer"
+                                    >
+                                      Entregado al Repartidor
+                                    </button>
+                                  </>
                                 )}
-                                <button
-                                  onClick={() => updateOrderStatus(order.id, 'ON_THE_WAY')}
-                                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition cursor-pointer"
-                                >
-                                  Entregado al Repartidor
-                                </button>
                               </div>
                             </div>
                           )}
@@ -1338,6 +1768,638 @@ export default function MerchantPage() {
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* PESTAÑA: CAJA POS (MOSTRADOR / MESAS / DOMICILIOS) */}
+        {/* ============================================================== */}
+        {activeTab === 'POS' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            {/* COLUMNA IZQUIERDA: CATÁLOGO TÁCTIL (lg:col-span-7) */}
+            <div className="lg:col-span-7 space-y-3">
+              {/* Buscador y Filtro por Categorías */}
+              <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs space-y-2.5">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={posSearch}
+                    onChange={(e) => setPosSearch(e.target.value)}
+                    placeholder="Buscar plato en la carta táctil..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium"
+                  />
+                  {posSearch && (
+                    <button
+                      onClick={() => setPosSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Categorías en chips horizontales con scroll */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+                  <button
+                    onClick={() => setPosCategoryFilter('TODAS')}
+                    className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition cursor-pointer ${
+                      posCategoryFilter === 'TODAS'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    🍽️ Todas ({products.length})
+                  </button>
+                  {menuCategories.map((cat) => {
+                    const count = products.filter((p) => p.categoryName === cat).length;
+                    return (
+                      <button
+                        key={cat}
+                        onClick={() => setPosCategoryFilter(cat)}
+                        className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition cursor-pointer ${
+                          posCategoryFilter === cat
+                            ? 'bg-orange-600 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {cat} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Grilla Táctil de Platos */}
+              {filteredPosProducts.length === 0 ? (
+                <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center space-y-2">
+                  <UtensilsCrossed className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="font-bold text-slate-700 text-sm">
+                    No se encontraron platos con este criterio
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Verifica el texto en el buscador o cambia la categoría seleccionada.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {filteredPosProducts.map((prod) => {
+                    const hasOptions = prod.options && prod.options.length > 0;
+                    const inCartCount = posCart
+                      .filter((c) => c.product.id === prod.id)
+                      .reduce((acc, c) => acc + c.quantity, 0);
+
+                    return (
+                      <button
+                        key={prod.id}
+                        type="button"
+                        disabled={!prod.isAvailable}
+                        onClick={() => handleAddDirectToPos(prod)}
+                        className={`relative text-left p-3 rounded-2xl border transition flex flex-col justify-between cursor-pointer active:scale-[0.98] ${
+                          !prod.isAvailable
+                            ? 'bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed'
+                            : inCartCount > 0
+                            ? 'bg-orange-50/40 border-orange-300 ring-2 ring-orange-500/20 shadow-xs'
+                            : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs hover:shadow-xs'
+                        }`}
+                      >
+                        {/* Insignia contador en comanda */}
+                        {inCartCount > 0 && (
+                          <span className="absolute -top-1.5 -right-1.5 bg-orange-600 text-white font-black text-[10px] w-5 h-5 rounded-full flex items-center justify-center shadow-xs">
+                            {inCartCount}
+                          </span>
+                        )}
+
+                        <div className="space-y-1">
+                          <div className="flex items-start justify-between gap-1">
+                            <span className="text-[10px] font-bold uppercase text-slate-400 line-clamp-1">
+                              {prod.categoryName}
+                            </span>
+                            {hasOptions && (
+                              <span className="text-[9px] bg-blue-100 text-blue-700 font-extrabold px-1.5 py-0.5 rounded-md shrink-0">
+                                Opciones
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="font-extrabold text-xs text-slate-900 leading-snug line-clamp-2">
+                            {prod.name}
+                          </h4>
+                          {prod.description && (
+                            <p className="text-[11px] text-slate-500 line-clamp-1">
+                              {prod.description}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="pt-2 flex items-center justify-between mt-1 border-t border-slate-100">
+                          <span className="font-black text-xs text-emerald-700">
+                            {formatCOP(prod.price)}
+                          </span>
+                          {!prod.isAvailable ? (
+                            <span className="text-[10px] font-black text-red-600">Agotado</span>
+                          ) : (
+                            <span className="w-5 h-5 rounded-lg bg-orange-50 text-orange-600 border border-orange-200 flex items-center justify-center text-xs font-black">
+                              +
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* COLUMNA DERECHA: COMANDA Y COBRO POS (lg:col-span-5) */}
+            <div className="lg:col-span-5 bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-sm space-y-4 sticky top-16">
+              {/* Header Comanda */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-orange-600" />
+                  <h3 className="font-extrabold text-sm text-slate-900">
+                    Comanda POS ({posCart.reduce((acc, it) => acc + it.quantity, 0)} items)
+                  </h3>
+                </div>
+                {posCart.length > 0 && (
+                  <button
+                    onClick={() => setPosCart([])}
+                    className="text-[11px] font-bold text-red-600 hover:text-red-700 transition cursor-pointer"
+                  >
+                    Vaciar
+                  </button>
+                )}
+              </div>
+
+              {/* Selector de Canal / Modalidad */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-extrabold text-slate-700 block">
+                  Modalidad de Venta *
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPosChannel('pos_local')}
+                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
+                      posChannel === 'pos_local'
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-base block">🍽️</span>
+                    <span className="text-[10px] font-extrabold block mt-0.5">En Mesa</span>
+                    <span className="text-[9px] opacity-80 block">$0 Domicilio</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPosChannel('pos_takeout')}
+                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
+                      posChannel === 'pos_takeout'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-base block">🛍️</span>
+                    <span className="text-[10px] font-extrabold block mt-0.5">Para Llevar</span>
+                    <span className="text-[9px] opacity-80 block">$0 Domicilio</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPosChannel('delivery_app')}
+                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
+                      posChannel === 'delivery_app'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-base block">🛵</span>
+                    <span className="text-[10px] font-extrabold block mt-0.5">Domicilio</span>
+                    <span className="text-[9px] opacity-80 block">+$7.000 COP</span>
+                  </button>
+                </div>
+
+                {/* Subcampo según canal */}
+                {posChannel === 'pos_local' && (
+                  <div className="pt-1">
+                    <input
+                      type="text"
+                      value={posTableNumber}
+                      onChange={(e) => setPosTableNumber(e.target.value)}
+                      placeholder="Identificador (ej. Mesa 4, Barra 2, Salón B)..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                )}
+
+                {posChannel === 'delivery_app' && (
+                  <div className="pt-1 space-y-1.5">
+                    <input
+                      type="text"
+                      value={posDeliveryAddress}
+                      onChange={(e) => setPosDeliveryAddress(e.target.value)}
+                      placeholder="Dirección exacta en Valledupar (ej. Cra 9 # 12-34)..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <input
+                      type="text"
+                      value={posDeliveryNeighborhood}
+                      onChange={(e) => setPosDeliveryNeighborhood(e.target.value)}
+                      placeholder="Barrio (ej. Novalito, Alfonso López, Las Flores)..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Datos del Cliente & Fidelización VIP */}
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-extrabold text-slate-800 flex items-center gap-1">
+                    <Phone className="w-3 h-3 text-slate-600" />
+                    <span>Celular Cliente (10 dígitos)</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSetExpressCustomer}
+                    className="text-[10px] font-black text-orange-600 hover:text-orange-700 bg-orange-100/70 hover:bg-orange-100 px-2 py-0.5 rounded-lg transition cursor-pointer"
+                    title="Usa teléfono genérico 0000000000 para ventas rápidas de mostrador"
+                  >
+                    ⚡ Mostrador Express
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={posCustomerPhone}
+                    onChange={(e) => handlePosPhoneChange(e.target.value)}
+                    placeholder="Ej: 3001234567"
+                    className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                  <input
+                    type="text"
+                    value={posCustomerName}
+                    onChange={(e) => setPosCustomerName(e.target.value)}
+                    placeholder="Nombre del cliente..."
+                    className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                {/* Banner de Fidelización VIP en tiempo real */}
+                {currentPosLoyalty && (
+                  <div className={`p-2 rounded-xl border flex items-center justify-between gap-2 ${currentPosLoyalty.badgeClass}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base">{currentPosLoyalty.icon}</span>
+                      <div>
+                        <span className="text-xs font-black block leading-none">
+                          Cliente {currentPosLoyalty.tier}
+                        </span>
+                        <span className="text-[10px] opacity-80 block leading-tight mt-0.5">
+                          {currentPosLoyalty.orderCount} pedidos entregados
+                        </span>
+                      </div>
+                    </div>
+                    {currentPosLoyalty.discountMessage && (
+                      <span className="text-[10px] font-bold text-amber-800 text-right">
+                        {currentPosLoyalty.discountMessage}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Items en Comanda */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-extrabold text-slate-700 block">
+                  Platos a Ordenar
+                </span>
+                {posCart.length === 0 ? (
+                  <div className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-6 text-center space-y-1">
+                    <ShoppingBag className="w-6 h-6 text-slate-300 mx-auto" />
+                    <p className="text-xs font-bold text-slate-600">Comanda vacía</p>
+                    <p className="text-[11px] text-slate-400">
+                      Toca cualquier plato de la izquierda para agregarlo.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="max-h-52 overflow-y-auto space-y-1.5 divide-y divide-slate-100 pr-1">
+                    {posCart.map((item) => (
+                      <div key={item.id} className="pt-1.5 first:pt-0 flex items-center justify-between gap-2 text-xs">
+                        <div className="flex-1 min-w-0">
+                          <h5 className="font-extrabold text-slate-900 truncate">
+                            {item.product.name}
+                          </h5>
+                          {item.selectedOptions && item.selectedOptions.length > 0 && (
+                            <p className="text-[10px] text-slate-500 line-clamp-1">
+                              + {item.selectedOptions.map((o) => o.itemName).join(', ')}
+                            </p>
+                          )}
+                          {item.notes && (
+                            <p className="text-[10px] text-amber-700 italic truncate">
+                              &quot;{item.notes}&quot;
+                            </p>
+                          )}
+                          <span className="text-[11px] font-bold text-slate-600">
+                            {formatCOP(item.itemTotal)}
+                          </span>
+                        </div>
+
+                        {/* Controles de Cantidad */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdatePosQty(item.id, -1)}
+                            className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center font-black cursor-pointer"
+                          >
+                            -
+                          </button>
+                          <span className="font-black text-xs w-4 text-center">
+                            {item.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdatePosQty(item.id, 1)}
+                            className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center font-black cursor-pointer"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePosItem(item.id)}
+                            className="w-6 h-6 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center cursor-pointer ml-1"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Selector de Método de Pago y Calculadora de Cambio */}
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <label className="text-[11px] font-extrabold text-slate-700 block">
+                  Método de Pago *
+                </label>
+                <div className="grid grid-cols-3 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPosPaymentType('EFECTIVO')}
+                    className={`py-1.5 px-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-1 ${
+                      posPaymentType === 'EFECTIVO'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Coins className="w-3.5 h-3.5" />
+                    <span>Efectivo</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPosPaymentType('TRANSFERENCIA')}
+                    className={`py-1.5 px-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-1 ${
+                      posPaymentType === 'TRANSFERENCIA'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Digital</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPosPaymentType('DIVIDIDO')}
+                    className={`py-1.5 px-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-1 ${
+                      posPaymentType === 'DIVIDIDO'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Mixto</span>
+                  </button>
+                </div>
+
+                {/* Pago 100% Efectivo con Calculadora de Devuelta */}
+                {posPaymentType === 'EFECTIVO' && (
+                  <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200/70 space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-amber-900">¿Con cuánto paga el cliente?</span>
+                      <button
+                        type="button"
+                        onClick={() => setPosCashTendered(posTotal.toString())}
+                        className="text-[10px] font-black text-amber-800 underline hover:text-amber-900"
+                      >
+                        Pago Exacto
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      <span className="text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs">$</span>
+                      <input
+                        type="number"
+                        value={posCashTendered}
+                        onChange={(e) => setPosCashTendered(e.target.value)}
+                        placeholder={posTotal > 0 ? posTotal.toString() : '0'}
+                        className="w-full bg-white border border-amber-300 rounded-xl pl-7 pr-3 py-1.5 text-xs text-slate-900 font-black focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+
+                    {/* Botones rápidos de billetes comunes */}
+                    {posTotal > 0 && (
+                      <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                        {[
+                          posTotal,
+                          Math.ceil(posTotal / 10000) * 10000,
+                          Math.ceil(posTotal / 20000) * 20000,
+                          Math.ceil(posTotal / 50000) * 50000,
+                        ]
+                          .filter((v, i, a) => v >= posTotal && a.indexOf(v) === i)
+                          .map((val) => (
+                            <button
+                              key={val}
+                              type="button"
+                              onClick={() => setPosCashTendered(val.toString())}
+                              className="px-2 py-0.5 rounded-lg bg-white border border-amber-200 text-amber-900 font-bold text-[10px] hover:bg-amber-100"
+                            >
+                              ${val.toLocaleString('es-CO')}
+                            </button>
+                          ))}
+                      </div>
+                    )}
+
+                    {/* Resultado de Cambio / Devuelta */}
+                    {Number(posCashTendered) > 0 && (
+                      <div className="pt-1 border-t border-amber-200/80 flex items-center justify-between font-black">
+                        <span className="text-amber-900 text-xs">Devuelta / Cambio:</span>
+                        <span
+                          className={`text-sm ${
+                            Number(posCashTendered) >= posTotal ? 'text-emerald-700' : 'text-red-600'
+                          }`}
+                        >
+                          {Number(posCashTendered) >= posTotal
+                            ? formatCOP(Number(posCashTendered) - posTotal)
+                            : `Faltan ${formatCOP(posTotal - Number(posCashTendered))}`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Pago 100% Digital / Transferencia */}
+                {posPaymentType === 'TRANSFERENCIA' && (
+                  <div className="bg-blue-50/70 p-3 rounded-2xl border border-blue-200/70 space-y-2 text-xs">
+                    <span className="font-extrabold text-blue-900 block">
+                      Selecciona la plataforma receptora:
+                    </span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(['Nequi', 'Daviplata', 'Bancolombia', 'Datáfono'] as TransferPlatform[]).map((plat) => (
+                        <button
+                          key={plat}
+                          type="button"
+                          onClick={() => setPosTransferPlatform(plat)}
+                          className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                            posTransferPlatform === plat
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-white border-blue-200 text-blue-900 hover:bg-blue-100/50'
+                          }`}
+                        >
+                          {plat}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pago Mixto / Dividido */}
+                {posPaymentType === 'DIVIDIDO' && (
+                  <div className="bg-indigo-50/70 p-3 rounded-2xl border border-indigo-200/70 space-y-2 text-xs">
+                    <span className="font-extrabold text-indigo-900 block">
+                      Desglose de Pago Dividido:
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                          En Efectivo ($)
+                        </label>
+                        <input
+                          type="number"
+                          value={posSplitCash}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPosSplitCash(val);
+                            const num = Number(val) || 0;
+                            if (num <= posTotal) {
+                              setPosSplitTransfer((posTotal - num).toString());
+                            }
+                          }}
+                          placeholder="0"
+                          className="w-full bg-white border border-indigo-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                          En Transferencia ($)
+                        </label>
+                        <input
+                          type="number"
+                          value={posSplitTransfer}
+                          onChange={(e) => setPosSplitTransfer(e.target.value)}
+                          placeholder="0"
+                          className="w-full bg-white border border-indigo-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-1 pt-1">
+                      {(['Nequi', 'Daviplata', 'Bancolombia', 'Datáfono'] as TransferPlatform[]).map((plat) => (
+                        <button
+                          key={plat}
+                          type="button"
+                          onClick={() => setPosTransferPlatform(plat)}
+                          className={`py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                            posTransferPlatform === plat
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white border-indigo-200 text-indigo-900'
+                          }`}
+                        >
+                          {plat}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Validación de balance */}
+                    {(() => {
+                      const totalSplit = (Number(posSplitCash) || 0) + (Number(posSplitTransfer) || 0);
+                      const diff = posTotal - totalSplit;
+                      return (
+                        <div className="pt-1 text-[11px] font-black flex items-center justify-between border-t border-indigo-200">
+                          <span>Suma Dividida: {formatCOP(totalSplit)}</span>
+                          <span className={diff === 0 ? 'text-emerald-600' : 'text-red-600'}>
+                            {diff === 0 ? '✓ Cuadrado' : diff > 0 ? `Faltan ${formatCOP(diff)}` : `Excede por ${formatCOP(-diff)}`}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Resumen Financiero de la Venta */}
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-1 text-xs">
+                <div className="flex justify-between text-slate-600">
+                  <span>Subtotal Comida:</span>
+                  <span className="font-bold text-slate-800">{formatCOP(posCartSubtotal)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Tarifa Domicilio:</span>
+                  <span className="font-bold text-slate-800">
+                    {posChannel === 'delivery_app' ? formatCOP(7000) : '$0 COP'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-900 font-black text-base pt-1.5 border-t border-slate-200">
+                  <span>TOTAL A COBRAR:</span>
+                  <span className="text-orange-600">{formatCOP(posTotal)}</span>
+                </div>
+              </div>
+
+              {/* Mensaje de Error en POS */}
+              {posError && (
+                <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{posError}</span>
+                </div>
+              )}
+
+              {/* Botón Maestro de Cobro y Envío a Cocina */}
+              <button
+                type="button"
+                disabled={posCart.length === 0 || posSubmitting}
+                onClick={handleChargePosOrder}
+                className={`w-full py-3.5 px-4 rounded-2xl font-black text-xs transition shadow-md flex items-center justify-center gap-2 cursor-pointer ${
+                  posCart.length === 0 || posSubmitting
+                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 active:scale-[0.99]'
+                }`}
+              >
+                {posSubmitting ? (
+                  <>
+                    <Clock className="w-4 h-4 animate-spin" />
+                    <span>Registrando y Enviando a Cocina...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Cobrar y Enviar a Cocina ({formatCOP(posTotal)})</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}
@@ -1870,34 +2932,71 @@ export default function MerchantPage() {
                 ))}
               </div>
 
-              <button
-                onClick={handlePrintSettlement}
-                className="bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Imprimir Cierre POS</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => {
+                    const periodLabel =
+                      salesPeriod === 'TODAY'
+                        ? 'Hoy'
+                        : salesPeriod === 'YESTERDAY'
+                        ? 'Ayer'
+                        : salesPeriod === 'WEEK'
+                        ? 'Últimos 7 Días'
+                        : salesPeriod === 'MONTH'
+                        ? 'Últimos 30 Días'
+                        : 'Histórico Total';
+                    const msg = generateWhatsAppSettlementMessage(restaurant.name, settlement, periodLabel);
+                    const waUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+                    window.open(waUrl, '_blank');
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Enviar resumen financiero del día por WhatsApp"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>📲 Enviar Cierre por WhatsApp</span>
+                </button>
+
+                <button
+                  onClick={handlePrintSettlement}
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Imprimir POS</span>
+                </button>
+              </div>
             </div>
 
-            {/* 4 KPIs Principales */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {/* KPIs Principales con Ticket Promedio y Canales */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
               <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Venta Comida Entregada
+                  Venta Comida Realizada
                 </span>
                 <span className="text-xl sm:text-2xl font-black text-emerald-600 mt-1 block">
                   {formatCOP(settlement.foodSubtotalTotal)}
                 </span>
                 <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  En {settlement.deliveredOrdersCount} pedidos completados
+                  {settlement.deliveredOrdersCount} ventas completadas
                 </span>
               </div>
 
               <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Comida en Efectivo vs Digital
+                  Ticket Promedio
                 </span>
-                <span className="text-sm font-black text-slate-900 mt-1 block">
+                <span className="text-xl sm:text-2xl font-black text-slate-900 mt-1 block">
+                  {formatCOP(settlement.averageTicket)}
+                </span>
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  Promedio por comanda
+                </span>
+              </div>
+
+              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Efectivo en Caja vs Digital
+                </span>
+                <span className="text-sm font-black text-amber-900 mt-1 block">
                   💵 {formatCOP(settlement.cashFoodSubtotal)}
                 </span>
                 <span className="text-xs font-bold text-blue-600 mt-0.5 block">
@@ -1907,25 +3006,28 @@ export default function MerchantPage() {
 
               <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Comisión DonDomi ({settlement.commissionRate}%)
+                  Canales de Venta
                 </span>
-                <span className="text-xl sm:text-2xl font-black text-orange-600 mt-1 block">
-                  {formatCOP(settlement.platformCommissionAmount)}
+                <span className="text-xs font-bold text-purple-700 mt-1 block">
+                  🍽️ Mesa: {settlement.posLocalCount} ({formatCOP(settlement.posLocalSales)})
                 </span>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  Neto comida: {formatCOP(settlement.netRestaurantFoodEarnings)}
+                <span className="text-xs font-bold text-amber-700 block">
+                  🛍️ Llevar: {settlement.posTakeoutCount} ({formatCOP(settlement.posTakeoutSales)})
+                </span>
+                <span className="text-xs font-bold text-blue-700 block">
+                  🛵 Domicilio: {settlement.deliveryAppCount} ({formatCOP(settlement.deliveryAppSales)})
                 </span>
               </div>
 
-              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs col-span-2 sm:col-span-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Flota de Despacho
+                  Comisión DonDomi (0%)
                 </span>
-                <span className="text-sm font-black text-blue-600 mt-1 block">
-                  🛵 DonDomi: {settlement.dondomiFleetCount} carreras
+                <span className="text-xl sm:text-2xl font-black text-emerald-600 mt-1 block">
+                  $0 COP
                 </span>
-                <span className="text-xs font-bold text-slate-700 mt-0.5 block">
-                  🏠 Propia: {settlement.ownFleetCount} carreras
+                <span className="text-[10px] text-emerald-700 font-extrabold mt-0.5 block">
+                  ✓ Modelo 100% Gratuito
                 </span>
               </div>
             </div>
@@ -2013,6 +3115,47 @@ export default function MerchantPage() {
                 </div>
               </div>
             </div>
+
+            {/* Top Platos Más Vendidos del Periodo */}
+            {settlement.topProducts && settlement.topProducts.length > 0 && (
+              <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                    <span>🏆</span>
+                    <span>Top Platos Más Vendidos del Periodo</span>
+                  </h4>
+                  <span className="text-[11px] font-bold text-slate-400">
+                    Ranking por unidades
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {settlement.topProducts.map((p, idx) => (
+                    <div
+                      key={p.name}
+                      className="p-3 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base shrink-0 font-black">
+                          {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                        </span>
+                        <div className="min-w-0">
+                          <h5 className="font-extrabold text-xs text-slate-900 truncate">
+                            {p.name}
+                          </h5>
+                          <span className="text-[10px] text-slate-500 block">
+                            {p.quantity} unidades vendidas
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs font-black text-emerald-700 shrink-0">
+                        {formatCOP(p.revenue)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Historial de Ventas del Periodo */}
             <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-3">
@@ -2641,6 +3784,244 @@ export default function MerchantPage() {
       )}
 
       {/* ============================================================== */}
+      {/* MODAL PERSONALIZAR OPCIONES DE PLATO EN CAJA POS */}
+      {/* ============================================================== */}
+      {posOptionProduct && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 shadow-2xl space-y-4 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                  {posOptionProduct.categoryName}
+                </span>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  {posOptionProduct.name}
+                </h3>
+                <span className="text-xs font-black text-emerald-700 block mt-0.5">
+                  Base: {formatCOP(posOptionProduct.price)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPosOptionProduct(null)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {posOptionModalError && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{posOptionModalError}</span>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-xs">
+              {posOptionProduct.options?.map((group) => {
+                const selectedItems = posSelectedOptionsByGroup[group.id] || [];
+                return (
+                  <div key={group.id} className="space-y-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-extrabold text-slate-900 block">{group.name}</span>
+                        <span className="text-[10px] text-slate-500 block">
+                          {group.required
+                            ? `Obligatorio (min ${group.minSelect || 1})`
+                            : 'Opcional'}
+                          {group.maxSelect ? ` · Máx ${group.maxSelect}` : ''}
+                        </span>
+                      </div>
+                      {group.required && selectedItems.length < (group.minSelect || 1) && (
+                        <span className="text-[9px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded">
+                          Requerido
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {group.items.map((it) => {
+                        const isChecked = selectedItems.some((s) => s.id === it.id);
+                        return (
+                          <label
+                            key={it.id}
+                            className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition ${
+                              isChecked
+                                ? 'bg-orange-50 border-orange-400 text-orange-950 font-bold'
+                                : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type={group.maxSelect === 1 ? 'radio' : 'checkbox'}
+                                name={group.id}
+                                checked={isChecked}
+                                onChange={() => {
+                                  setPosSelectedOptionsByGroup((prev) => {
+                                    const current = prev[group.id] || [];
+                                    if (group.maxSelect === 1) {
+                                      return { ...prev, [group.id]: [it] };
+                                    }
+                                    if (isChecked) {
+                                      return {
+                                        ...prev,
+                                        [group.id]: current.filter((s) => s.id !== it.id),
+                                      };
+                                    }
+                                    if (group.maxSelect && current.length >= group.maxSelect) {
+                                      return prev;
+                                    }
+                                    return {
+                                      ...prev,
+                                      [group.id]: [...current, it],
+                                    };
+                                  });
+                                }}
+                                className="accent-orange-600"
+                              />
+                              <span>{it.name}</span>
+                            </div>
+                            <span className="font-bold text-slate-700">
+                              {it.additionalPrice > 0 ? `+${formatCOP(it.additionalPrice)}` : 'Incluido'}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Cantidad e Instrucción especial para cocina */}
+              <div className="space-y-2 pt-1">
+                <label className="font-extrabold text-slate-800 block">
+                  Instrucción especial para cocina (opcional):
+                </label>
+                <input
+                  type="text"
+                  value={posOptionNotes}
+                  onChange={(e) => setPosOptionNotes(e.target.value)}
+                  placeholder="Ej: Sin cebolla, término medio, salsa aparte..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="font-extrabold text-slate-800">Cantidad:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPosOptionQty((q) => Math.max(1, q - 1))}
+                    className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black flex items-center justify-center cursor-pointer"
+                  >
+                    -
+                  </button>
+                  <span className="font-black text-sm w-6 text-center">{posOptionQty}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPosOptionQty((q) => q + 1)}
+                    className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black flex items-center justify-center cursor-pointer"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setPosOptionProduct(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAddOptionProduct}
+                className="px-5 py-2.5 rounded-xl text-xs font-extrabold bg-orange-600 hover:bg-orange-500 text-white shadow-md shadow-orange-600/20 transition cursor-pointer"
+              >
+                Agregar a la Comanda
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL CELEBRACIÓN Y CONFIRMACIÓN VENTA POS EXITOSA */}
+      {/* ============================================================== */}
+      {posSuccessOrder && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-center animate-in fade-in zoom-in-95">
+            <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+
+            <div>
+              <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">
+                Venta Cobrada y En Cocina
+              </span>
+              <h3 className="font-black text-xl text-slate-900 mt-0.5">
+                ¡Orden #{posSuccessOrder.orderNumber} Registrada!
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                La orden ya aparece en la bandeja de Comandas de Cocina para preparación inmediata.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 rounded-2xl p-3.5 border border-slate-100 space-y-1.5 text-xs text-left">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Modalidad:</span>
+                <span className="font-extrabold text-slate-800">
+                  {posSuccessOrder.orderChannel === 'pos_local'
+                    ? `🍽️ Mesa ${posSuccessOrder.tableNumber || ''}`
+                    : posSuccessOrder.orderChannel === 'pos_takeout'
+                    ? '🛍️ Para Llevar'
+                    : '🛵 Domicilio DonDomi'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Cliente:</span>
+                <span className="font-bold text-slate-800">{posSuccessOrder.customerName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Forma de Pago:</span>
+                <span className="font-bold text-slate-800">
+                  {posSuccessOrder.isSplitPayment
+                    ? `Mixto (Efec: ${formatCOP(posSuccessOrder.cashAmount || 0)} + ${posSuccessOrder.transferPlatform}: ${formatCOP(posSuccessOrder.transferAmount || 0)})`
+                    : posSuccessOrder.paymentMethod}
+                </span>
+              </div>
+              <div className="flex justify-between font-black text-sm pt-1 border-t border-slate-200">
+                <span className="text-slate-900">Total Cobrado:</span>
+                <span className="text-emerald-600">{formatCOP(posSuccessOrder.total)}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => handlePrintTicket(posSuccessOrder)}
+                className="py-2.5 px-3 rounded-xl text-xs font-extrabold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Imprimir Ticket POS</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPosSuccessOrder(null)}
+                className="py-2.5 px-3 rounded-xl text-xs font-black bg-orange-600 hover:bg-orange-500 text-white transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-orange-600/20"
+              >
+                <span>Nueva Venta POS</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
       {/* DIÁLOGO IMPRESIÓN COMANDA TÉRMICA POS (58mm/80mm) */}
       {/* ============================================================== */}
       {ticketOrder && !printingSettlement && (
@@ -2648,17 +4029,29 @@ export default function MerchantPage() {
           <div className="text-center pb-2 border-b border-black">
             <h2 className="text-base font-black">*** DON DOMI ***</h2>
             <p className="font-bold">{ticketOrder.restaurantName}</p>
-            <p className="text-[10px]">Valledupar, Cesar</p>
-            <p className="font-bold mt-1">ORDEN: #{ticketOrder.orderNumber}</p>
+            <p className="text-[10px]">Valledupar, Cesar, Colombia</p>
+            <p className="font-black mt-1 text-sm">ORDEN: #{ticketOrder.orderNumber}</p>
             <p className="text-[10px]">{new Date(ticketOrder.createdAt).toLocaleString('es-CO')}</p>
           </div>
 
           <div className="py-2 border-b border-black space-y-1">
+            <p>
+              <strong>MODALIDAD:</strong>{' '}
+              {ticketOrder.orderChannel === 'pos_local'
+                ? `EN MESA (${ticketOrder.tableNumber || 'S/N'})`
+                : ticketOrder.orderChannel === 'pos_takeout'
+                ? 'PARA LLEVAR'
+                : 'DOMICILIO APP DONDOMI'}
+            </p>
             <p><strong>CLIENTE:</strong> {ticketOrder.customerName}</p>
             <p><strong>TEL:</strong> {ticketOrder.customerPhone}</p>
-            <p><strong>DIR:</strong> {ticketOrder.deliveryAddress.street}, {ticketOrder.deliveryAddress.neighborhood}</p>
-            {ticketOrder.deliveryAddress.reference && (
-              <p><strong>REF:</strong> {ticketOrder.deliveryAddress.reference}</p>
+            {ticketOrder.orderChannel === 'delivery_app' && (
+              <>
+                <p><strong>DIR:</strong> {ticketOrder.deliveryAddress.street}, {ticketOrder.deliveryAddress.neighborhood}</p>
+                {ticketOrder.deliveryAddress.reference && (
+                  <p><strong>REF:</strong> {ticketOrder.deliveryAddress.reference}</p>
+                )}
+              </>
             )}
           </div>
 
@@ -2675,6 +4068,11 @@ export default function MerchantPage() {
                     + {it.selectedOptions.map((o) => o.itemName).join(', ')}
                   </p>
                 )}
+                {it.notes && (
+                  <p className="text-[10px] pl-2 italic">
+                    * {it.notes}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -2685,14 +4083,22 @@ export default function MerchantPage() {
               <span>{formatCOP(ticketOrder.subtotal)}</span>
             </div>
             <div className="flex justify-between">
-              <span>Domicilio:</span>
+              <span>Tarifa Domicilio:</span>
               <span>{formatCOP(ticketOrder.deliveryFee)}</span>
             </div>
             <div className="flex justify-between font-black text-sm pt-1 border-t border-black">
               <span>TOTAL A COBRAR:</span>
               <span>{formatCOP(ticketOrder.total)}</span>
             </div>
-            <p className="pt-1"><strong>PAGO:</strong> {ticketOrder.paymentMethod}</p>
+            {ticketOrder.isSplitPayment ? (
+              <p className="pt-1">
+                <strong>PAGO MIXTO:</strong> Efectivo {formatCOP(ticketOrder.cashAmount || 0)} + {ticketOrder.transferPlatform || 'Digital'} {formatCOP(ticketOrder.transferAmount || 0)}
+              </p>
+            ) : (
+              <p className="pt-1">
+                <strong>PAGO:</strong> {ticketOrder.paymentMethod === 'TRANSFERENCIA' && ticketOrder.transferPlatform ? `TRANSFERENCIA (${ticketOrder.transferPlatform})` : ticketOrder.paymentMethod}
+              </p>
+            )}
           </div>
 
           <div className="text-center pt-2 text-[10px]">
@@ -2708,7 +4114,7 @@ export default function MerchantPage() {
       {printingSettlement && (
         <div id="print-settlement" className="hidden print:block fixed inset-0 bg-white p-4 font-mono text-black text-xs leading-tight">
           <div className="text-center pb-2 border-b border-black">
-            <h2 className="text-base font-black">*** CIERRE DE CAJA DON DOMI ***</h2>
+            <h2 className="text-base font-black">*** CIERRE DE CAJA POS ***</h2>
             <p className="font-bold">{restaurant.name}</p>
             <p className="text-[10px]">Periodo: {salesPeriod}</p>
             <p className="text-[10px]">{new Date().toLocaleString('es-CO')}</p>
@@ -2716,48 +4122,65 @@ export default function MerchantPage() {
 
           <div className="py-2 border-b border-black space-y-1">
             <div className="flex justify-between">
-              <span>Pedidos Entregados:</span>
+              <span>Ventas Completadas:</span>
               <span>{settlement.deliveredOrdersCount}</span>
             </div>
             <div className="flex justify-between">
-              <span>Pedidos Cancelados:</span>
-              <span>{settlement.cancelledOrdersCount}</span>
+              <span>Ticket Promedio:</span>
+              <span>{formatCOP(settlement.averageTicket)}</span>
             </div>
             <div className="flex justify-between font-bold pt-1">
               <span>Subtotal Venta Comida:</span>
               <span>{formatCOP(settlement.foodSubtotalTotal)}</span>
             </div>
             <div className="flex justify-between">
-              <span>- En Efectivo:</span>
+              <span>- Efectivo en Caja:</span>
               <span>{formatCOP(settlement.cashFoodSubtotal)}</span>
             </div>
             <div className="flex justify-between">
-              <span>- En Transferencias:</span>
+              <span>- Transferencias / Digital:</span>
               <span>{formatCOP(settlement.digitalFoodSubtotal)}</span>
             </div>
           </div>
 
           <div className="py-2 border-b border-black space-y-1">
+            <p className="font-bold">DESGLOSE CANALES:</p>
             <div className="flex justify-between">
-              <span>Carreras Flota DonDomi:</span>
-              <span>{settlement.dondomiFleetCount}</span>
+              <span>- En Mesa (POS Local):</span>
+              <span>{settlement.posLocalCount} ({formatCOP(settlement.posLocalSales)})</span>
             </div>
             <div className="flex justify-between">
-              <span>Carreras Flota Propia:</span>
-              <span>{settlement.ownFleetCount}</span>
+              <span>- Para Llevar (Takeout):</span>
+              <span>{settlement.posTakeoutCount} ({formatCOP(settlement.posTakeoutSales)})</span>
             </div>
             <div className="flex justify-between">
-              <span>Domicilios Digitales Repartidor:</span>
-              <span>{formatCOP(settlement.deliveryFeesOwedToDrivers)}</span>
+              <span>- Domicilios DonDomi:</span>
+              <span>{settlement.deliveryAppCount} ({formatCOP(settlement.deliveryAppSales)})</span>
             </div>
+          </div>
+
+          {settlement.topProducts && settlement.topProducts.length > 0 && (
+            <div className="py-2 border-b border-black space-y-1">
+              <p className="font-bold">TOP PLATOS VENDIDOS:</p>
+              {settlement.topProducts.slice(0, 3).map((tp, idx) => (
+                <div key={tp.name} className="flex justify-between">
+                  <span>#{idx + 1} {tp.name} ({tp.quantity})</span>
+                  <span>{formatCOP(tp.revenue)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="py-2 border-b border-black space-y-1">
             <div className="flex justify-between">
-              <span>Comisión DonDomi ({settlement.commissionRate}%):</span>
-              <span>{formatCOP(settlement.platformCommissionAmount)}</span>
+              <span>Comisión DonDomi (0%):</span>
+              <span>$0 COP</span>
             </div>
           </div>
 
           <div className="text-center pt-2 text-[10px]">
             <p>*** DonDomi Valledupar ***</p>
+            <p>Plataforma 100% Gratuita para Restaurantes</p>
           </div>
         </div>
       )}

@@ -12,6 +12,8 @@ import {
   FoodCategory,
   Driver,
   MutationResult,
+  OrderChannel,
+  TransferPlatform,
 } from '@/types';
 import { FOOD_CATEGORIES, INITIAL_DRIVERS, RESTAURANTS as INITIAL_RESTAURANTS, PRODUCTS_BY_RESTAURANT as INITIAL_PRODUCTS, MOCK_ORDERS as INITIAL_ORDERS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
@@ -28,18 +30,18 @@ export interface CartItem {
   itemTotal: number;
 }
 
-// Matriz de transiciones válidas para ciclo de vida de pedidos
+// Matriz de transiciones válidas para ciclo de vida de pedidos (incluye soporte POS)
 export const VALID_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   PENDING: ['PREPARING', 'CANCELLED'],
   CONFIRMED: ['PREPARING', 'CANCELLED'],
-  PREPARING: ['READY_FOR_PICKUP', 'ON_THE_WAY', 'CANCELLED'],
-  READY_FOR_PICKUP: ['ON_THE_WAY', 'CANCELLED'],
+  PREPARING: ['READY_FOR_PICKUP', 'ON_THE_WAY', 'DELIVERED', 'CANCELLED'],
+  READY_FOR_PICKUP: ['ON_THE_WAY', 'DELIVERED', 'CANCELLED'],
   ON_THE_WAY: ['DELIVERED', 'READY_FOR_PICKUP', 'CANCELLED'],
   DELIVERED: [], // Terminal
   CANCELLED: [], // Terminal
 };
 
-// Parser seguro de notas de cancelación, incidencias, flota y calificaciones
+// Parser seguro de notas de cancelación, incidencias, flota, calificaciones y metadatos POS
 export function parseOrderNotes(notes?: string) {
   if (!notes) return {};
   const res: {
@@ -49,6 +51,12 @@ export function parseOrderNotes(notes?: string) {
     deliveryFleet?: 'DONDOMI' | 'PROPIO';
     rating?: number;
     reviewComment?: string;
+    orderChannel?: OrderChannel;
+    tableNumber?: string;
+    isSplitPayment?: boolean;
+    cashAmount?: number;
+    transferAmount?: number;
+    transferPlatform?: TransferPlatform;
   } = {};
   const cancelMatch = notes.match(
     /\[Cancelado por (CLIENTE|RESTAURANTE|SISTEMA|ADMINISTRADOR):\s*([^\]]+)\]/i
@@ -71,6 +79,21 @@ export function parseOrderNotes(notes?: string) {
     res.rating = Number(ratingMatch[1]) || 5;
     if (ratingMatch[2]) res.reviewComment = ratingMatch[2].trim();
   }
+
+  const channelMatch = notes.match(/\[Canal:\s*(delivery_app|pos_local|pos_takeout)(?:\s*\|\s*Mesa:\s*([^\]]+))?\]/i);
+  if (channelMatch) {
+    res.orderChannel = channelMatch[1].toLowerCase() as OrderChannel;
+    if (channelMatch[2]) res.tableNumber = channelMatch[2].trim();
+  }
+
+  const splitMatch = notes.match(/\[Pago Dividido:\s*Efectivo\s*\$([\d.]+)\s*\+\s*([^\$]+)\s*\$([\d.]+)\]/i);
+  if (splitMatch) {
+    res.isSplitPayment = true;
+    res.cashAmount = Number(splitMatch[1]);
+    res.transferPlatform = splitMatch[2].trim() as TransferPlatform;
+    res.transferAmount = Number(splitMatch[3]);
+  }
+
   return res;
 }
 
@@ -560,6 +583,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               deliveryFleet: parsed.deliveryFleet,
               rating: parsed.rating,
               reviewComment: parsed.reviewComment,
+              orderChannel: row.order_channel || parsed.orderChannel || 'delivery_app',
+              tableNumber: row.table_number || parsed.tableNumber || undefined,
+              isSplitPayment: Boolean(row.is_split_payment ?? parsed.isSplitPayment ?? false),
+              cashAmount: row.cash_amount != null ? Number(row.cash_amount) : (parsed.cashAmount ?? 0),
+              transferAmount: row.transfer_amount != null ? Number(row.transfer_amount) : (parsed.transferAmount ?? 0),
+              transferPlatform: row.transfer_platform || parsed.transferPlatform || undefined,
             };
             setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== newOrder.id)]);
           } else if (payload.eventType === 'UPDATE') {
@@ -581,6 +610,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                       deliveryFleet: parsed.deliveryFleet || o.deliveryFleet,
                       rating: parsed.rating || o.rating,
                       reviewComment: parsed.reviewComment || o.reviewComment,
+                      orderChannel: row.order_channel || parsed.orderChannel || o.orderChannel || 'delivery_app',
+                      tableNumber: row.table_number || parsed.tableNumber || o.tableNumber,
+                      isSplitPayment: row.is_split_payment !== undefined ? Boolean(row.is_split_payment) : (parsed.isSplitPayment ?? o.isSplitPayment),
+                      cashAmount: row.cash_amount != null ? Number(row.cash_amount) : (parsed.cashAmount ?? o.cashAmount),
+                      transferAmount: row.transfer_amount != null ? Number(row.transfer_amount) : (parsed.transferAmount ?? o.transferAmount),
+                      transferPlatform: row.transfer_platform || parsed.transferPlatform || o.transferPlatform,
                     }
                   : o
               )
@@ -1054,10 +1089,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
     });
 
-    const verifiedPricing = calculateOrderPricing(verifiedSubtotal, newOrder.deliveryFee);
+    const isPosOrder = newOrder.orderChannel === 'pos_local' || newOrder.orderChannel === 'pos_takeout';
+    const effectiveDeliveryFee = isPosOrder ? 0 : (typeof newOrder.deliveryFee === 'number' ? newOrder.deliveryFee : globalDeliveryFee);
+    const verifiedPricing = calculateOrderPricing(verifiedSubtotal, effectiveDeliveryFee);
+
+    // Formatear notas serializando metadatos POS si aplica para máxima compatibilidad
+    let formattedNotes = newOrder.customerNotes || '';
+    if (newOrder.orderChannel && newOrder.orderChannel !== 'delivery_app') {
+      formattedNotes = `[Canal: ${newOrder.orderChannel}${newOrder.tableNumber ? ` | Mesa: ${newOrder.tableNumber}` : ''}] ${formattedNotes}`.trim();
+    }
+    if (newOrder.isSplitPayment) {
+      formattedNotes = `[Pago Dividido: Efectivo $${newOrder.cashAmount || 0} + ${newOrder.transferPlatform || 'Transferencia'} $${newOrder.transferAmount || 0}] ${formattedNotes}`.trim();
+    }
 
     // 3. Persistir en Supabase con precios e ítems verificados
-    const dbRow = {
+    const dbRow: any = {
       id: newOrder.id,
       order_number: newOrder.orderNumber,
       customer_name: newOrder.customerName,
@@ -1075,13 +1121,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       payment_method: newOrder.paymentMethod,
       payment_status: newOrder.paymentStatus,
       delivery_address: newOrder.deliveryAddress,
-      customer_notes: newOrder.customerNotes || null,
+      customer_notes: formattedNotes || null,
       estimated_delivery_time: newOrder.estimatedDeliveryTime || null,
+      order_channel: newOrder.orderChannel || 'delivery_app',
+      table_number: newOrder.tableNumber || null,
+      is_split_payment: Boolean(newOrder.isSplitPayment),
+      cash_amount: Number(newOrder.cashAmount) || 0,
+      transfer_amount: Number(newOrder.transferAmount) || 0,
+      transfer_platform: newOrder.transferPlatform || null,
     };
 
+    let insertError = null;
     const { error } = await supabase.from('orders').insert([dbRow]);
     if (error) {
-      console.error('Error guardando pedido en Supabase:', error);
+      if (error.code === '42703' || String(error.message).includes('column')) {
+        const fallbackRow = { ...dbRow };
+        delete fallbackRow.order_channel;
+        delete fallbackRow.table_number;
+        delete fallbackRow.is_split_payment;
+        delete fallbackRow.cash_amount;
+        delete fallbackRow.transfer_amount;
+        delete fallbackRow.transfer_platform;
+        const retry = await supabase.from('orders').insert([fallbackRow]);
+        insertError = retry.error;
+      } else {
+        insertError = error;
+      }
+    }
+
+    if (insertError) {
+      console.error('Error guardando pedido en Supabase:', insertError);
       throw new Error('Hubo un problema de conexión al registrar la orden en Supabase. Por favor intenta de nuevo.');
     }
 
@@ -1093,6 +1162,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deliveryFee: verifiedPricing.deliveryFee,
       serviceFee: verifiedPricing.serviceFee,
       total: verifiedPricing.total,
+      customerNotes: formattedNotes || undefined,
     };
 
     // Actualizar estado local sólo después de confirmar guardado en Supabase

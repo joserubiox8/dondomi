@@ -37,6 +37,7 @@ import {
   calculateDriverSettlement,
   SettlementPeriod,
 } from '@/lib/pricing';
+import { getCustomerLoyaltyTier } from '@/services/dataService';
 import { Restaurant, FoodCategory, Driver, Order, OrderStatus } from '@/types';
 
 type AdminTab =
@@ -1853,44 +1854,56 @@ export default function AdminPage() {
                 </p>
               ) : (
                 <div className="divide-y divide-slate-100 text-xs">
-                  {customersDirectory.map((c) => (
-                    <div
-                      key={c.phone}
-                      className="py-3 flex flex-wrap items-center justify-between gap-3"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-slate-900 text-sm">{c.name}</span>
-                          <span className="text-slate-400">•</span>
-                          <span className="font-mono font-bold text-blue-600">{c.phone}</span>
+                  {customersDirectory.map((c) => {
+                    const loyalty = getCustomerLoyaltyTier(c.phone, orders);
+                    return (
+                      <div
+                        key={c.phone}
+                        className="py-3 flex flex-wrap items-center justify-between gap-3"
+                      >
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-slate-900 text-sm">{c.name}</span>
+                            <span className="text-slate-400">•</span>
+                            <span className="font-mono font-bold text-blue-600">{c.phone}</span>
+                            {loyalty && (
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${loyalty.badgeClass}`}
+                                title={`Cliente con ${loyalty.orderCount} pedidos entregados`}
+                              >
+                                <span>{loyalty.icon}</span>
+                                <span>{loyalty.tier}</span>
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-slate-500 mt-0.5">
+                            📍 {c.street}, Barrio {c.neighborhood} · Último pedido:{' '}
+                            {new Date(c.lastOrderAt).toLocaleDateString('es-CO')}
+                          </p>
                         </div>
-                        <p className="text-slate-500 mt-0.5">
-                          📍 {c.street}, Barrio {c.neighborhood} · Último pedido:{' '}
-                          {new Date(c.lastOrderAt).toLocaleDateString('es-CO')}
-                        </p>
-                      </div>
 
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <span className="font-black text-emerald-600 text-sm block">
-                            {formatCOP(c.totalSpent)}
-                          </span>
-                          <span className="text-[10px] text-slate-500">
-                            {c.deliveredCount} entregados · {c.cancelledCount} cancelados
-                          </span>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <span className="font-black text-emerald-600 text-sm block">
+                              {formatCOP(c.totalSpent)}
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              {c.deliveredCount} entregados · {c.cancelledCount} cancelados
+                            </span>
+                          </div>
+
+                          <a
+                            href={`https://wa.me/57${c.phone}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-3 py-1.5 rounded-xl border border-emerald-200"
+                          >
+                            WhatsApp
+                          </a>
                         </div>
-
-                        <a
-                          href={`https://wa.me/57${c.phone}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-3 py-1.5 rounded-xl border border-emerald-200"
-                        >
-                          WhatsApp
-                        </a>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

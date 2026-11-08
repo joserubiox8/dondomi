@@ -20,6 +20,12 @@ export interface PricingSummary {
   itemsCount: number;
 }
 
+export interface TopSoldProduct {
+  name: string;
+  quantity: number;
+  revenue: number;
+}
+
 export interface RestaurantSettlementSummary {
   totalOrdersCount: number;
   deliveredOrdersCount: number;
@@ -48,6 +54,16 @@ export interface RestaurantSettlementSummary {
   netRestaurantFoodEarnings: number;
   /** Total que el restaurante debe transferir a DonDomi/Flota (Comisión DonDomi + Domicilios digitales de flota DonDomi) */
   totalOwedByRestaurant: number;
+  // Métricas avanzadas de POS Híbrido y Cierre Inteligente
+  averageTicket: number;
+  splitPaymentsCount: number;
+  posLocalCount: number;
+  posLocalSales: number;
+  posTakeoutCount: number;
+  posTakeoutSales: number;
+  deliveryAppCount: number;
+  deliveryAppSales: number;
+  topProducts: TopSoldProduct[];
 }
 
 export interface DriverSettlementSummary {
@@ -186,7 +202,14 @@ export function calculateRestaurantSettlement(
   orders: Order[],
   commissionRate: number = 0
 ): RestaurantSettlementSummary {
-  const delivered = orders.filter((o) => o.status === 'DELIVERED');
+  // En el POS Híbrido, las ventas completadas comprenden las órdenes 'DELIVERED'
+  // más los pedidos locales/mostrador ('pos_local' y 'pos_takeout') ya cobrados y no cancelados
+  const delivered = orders.filter((o) => {
+    if (o.status === 'CANCELLED') return false;
+    if (o.status === 'DELIVERED') return true;
+    const isPos = o.orderChannel === 'pos_local' || o.orderChannel === 'pos_takeout';
+    return isPos && o.paymentStatus === 'COMPLETED';
+  });
   const cancelled = orders.filter((o) => o.status === 'CANCELLED');
 
   let foodSubtotalTotal = 0;
@@ -196,6 +219,7 @@ export function calculateRestaurantSettlement(
   let digitalOrdersCount = 0;
   let digitalFoodSubtotal = 0;
   let digitalTotalCollected = 0;
+  let splitPaymentsCount = 0;
   let nequiSubtotal = 0;
   let daviplataSubtotal = 0;
   let brebSubtotal = 0;
@@ -206,24 +230,72 @@ export function calculateRestaurantSettlement(
   let deliveryFeesOwedToDrivers = 0;
   let ownFleetDeliveryEarnings = 0;
 
+  let posLocalCount = 0;
+  let posLocalSales = 0;
+  let posTakeoutCount = 0;
+  let posTakeoutSales = 0;
+  let deliveryAppCount = 0;
+  let deliveryAppSales = 0;
+
+  const productSalesMap = new Map<string, TopSoldProduct>();
+
   for (const ord of delivered) {
     const sub = Number(ord.subtotal) || 0;
-    const delFee = Number(ord.deliveryFee) || DEFAULT_VALLEDUPAR_DELIVERY_FEE;
+    const delFee = ord.orderChannel === 'pos_local' || ord.orderChannel === 'pos_takeout'
+      ? 0
+      : (Number(ord.deliveryFee) || DEFAULT_VALLEDUPAR_DELIVERY_FEE);
     const tot = Number(ord.total) || sub + delFee;
     const ownFleet = isOwnFleetOrder(ord);
-    const cash = isCashPayment(ord.paymentMethod);
 
     foodSubtotalTotal += sub;
     deliveryFeesTotal += delFee;
 
-    if (ownFleet) {
-      ownFleetCount += 1;
-      ownFleetDeliveryEarnings += delFee;
+    // Desglose por canales de venta
+    if (ord.orderChannel === 'pos_local') {
+      posLocalCount += 1;
+      posLocalSales += sub;
+    } else if (ord.orderChannel === 'pos_takeout') {
+      posTakeoutCount += 1;
+      posTakeoutSales += sub;
     } else {
-      dondomiFleetCount += 1;
+      deliveryAppCount += 1;
+      deliveryAppSales += tot;
+      if (ownFleet) {
+        ownFleetCount += 1;
+        ownFleetDeliveryEarnings += delFee;
+      } else {
+        dondomiFleetCount += 1;
+      }
     }
 
-    if (cash) {
+    // Acumulación de productos para Top vendidos
+    if (Array.isArray(ord.items)) {
+      for (const item of ord.items) {
+        const pName = item.productName || 'Plato';
+        const existing = productSalesMap.get(pName) || { name: pName, quantity: 0, revenue: 0 };
+        existing.quantity += Number(item.quantity) || 1;
+        existing.revenue += Number(item.subtotal) || 0;
+        productSalesMap.set(pName, existing);
+      }
+    }
+
+    // Desglose exacto de Efectivo vs. Digital (con soporte de Pagos Divididos / Mixtos)
+    if (ord.isSplitPayment) {
+      splitPaymentsCount += 1;
+      const cPortion = Number(ord.cashAmount) || 0;
+      const tPortion = Number(ord.transferAmount) || 0;
+
+      cashTotalCollected += cPortion;
+      digitalTotalCollected += tPortion;
+
+      // Distribución proporcional o directa en comida
+      cashFoodSubtotal += Math.min(sub, cPortion);
+      digitalFoodSubtotal += Math.max(0, sub - Math.min(sub, cPortion));
+
+      if (ord.transferPlatform === 'Nequi') nequiSubtotal += tPortion;
+      else if (ord.transferPlatform === 'Daviplata') daviplataSubtotal += tPortion;
+      else if (ord.transferPlatform === 'Bancolombia' || ord.transferPlatform === 'Datáfono') cardSubtotal += tPortion;
+    } else if (isCashPayment(ord.paymentMethod)) {
       cashOrdersCount += 1;
       cashFoodSubtotal += sub;
       cashTotalCollected += tot;
@@ -235,11 +307,10 @@ export function calculateRestaurantSettlement(
       if (ord.paymentMethod === 'NEQUI') nequiSubtotal += sub;
       else if (ord.paymentMethod === 'DAVIPLATA') daviplataSubtotal += sub;
       else if (ord.paymentMethod === 'BRE_B') brebSubtotal += sub;
-      else if (ord.paymentMethod === 'CARD') cardSubtotal += sub;
+      else if (ord.paymentMethod === 'CARD' || ord.paymentMethod === 'TRANSFERENCIA') cardSubtotal += sub;
 
-      // Si el cliente pagó por transferencia a la cuenta del restaurante pero la carrera la hizo un domiciliario DonDomi,
-      // el restaurante recibió los $7.000 del domicilio y debe entregárselos al domiciliario / DonDomi.
-      if (!ownFleet) {
+      // Si el cliente pagó domicilio por transferencia pero la carrera la hizo flota DonDomi
+      if (ord.orderChannel === 'delivery_app' && !ownFleet && delFee > 0) {
         deliveryFeesOwedToDrivers += delFee;
       }
     }
@@ -248,6 +319,11 @@ export function calculateRestaurantSettlement(
   const platformCommissionAmount = calculateCommission(foodSubtotalTotal, commissionRate);
   const netRestaurantFoodEarnings = Math.max(0, foodSubtotalTotal - platformCommissionAmount);
   const totalOwedByRestaurant = platformCommissionAmount + deliveryFeesOwedToDrivers;
+  const averageTicket = delivered.length > 0 ? Math.round(foodSubtotalTotal / delivered.length) : 0;
+
+  const topProducts = Array.from(productSalesMap.values())
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 5);
 
   return {
     totalOrdersCount: orders.length,
@@ -273,7 +349,57 @@ export function calculateRestaurantSettlement(
     platformCommissionAmount,
     netRestaurantFoodEarnings,
     totalOwedByRestaurant,
+    averageTicket,
+    splitPaymentsCount,
+    posLocalCount,
+    posLocalSales,
+    posTakeoutCount,
+    posTakeoutSales,
+    deliveryAppCount,
+    deliveryAppSales,
+    topProducts,
   };
+}
+
+/**
+ * Genera el texto perfectamente formateado para compartir el Cierre de Caja por WhatsApp en 1 clic.
+ */
+export function generateWhatsAppSettlementMessage(
+  restaurantName: string,
+  settlement: RestaurantSettlementSummary,
+  periodLabel: string = 'Hoy'
+): string {
+  const formatMoney = (n: number) => `$ ${n.toLocaleString('es-CO')} COP`;
+
+  let msg = `📊 *CIERRE DE CAJA — ${restaurantName.toUpperCase()}*\n`;
+  msg += `📅 *Período:* ${periodLabel} (${new Date().toLocaleDateString('es-CO')})\n`;
+  msg += `---------------------------------\n`;
+  msg += `💰 *Ventas Totales:* ${formatMoney(settlement.foodSubtotalTotal)}\n`;
+  msg += `🧾 *Total Pedidos:* ${settlement.deliveredOrdersCount}\n`;
+  msg += `🎯 *Ticket Promedio:* ${formatMoney(settlement.averageTicket)}\n\n`;
+
+  msg += `💵 *Efectivo en Caja:* ${formatMoney(settlement.cashTotalCollected)}\n`;
+  msg += `📲 *Transferencias / Digital:* ${formatMoney(settlement.digitalTotalCollected)}\n`;
+  if (settlement.splitPaymentsCount > 0) {
+    msg += `⚡ *Pagos Divididos (Mixtos):* ${settlement.splitPaymentsCount} transacciones\n`;
+  }
+  msg += `\n🛵 *Canales de Venta:*\n`;
+  msg += `• 🍽️ En Mesa (POS): ${settlement.posLocalCount} pedidos (${formatMoney(settlement.posLocalSales)})\n`;
+  msg += `• 🛍️ Para Llevar (POS): ${settlement.posTakeoutCount} pedidos (${formatMoney(settlement.posTakeoutSales)})\n`;
+  msg += `• 🛵 Domicilios App DonDomi: ${settlement.deliveryAppCount} pedidos (${formatMoney(settlement.deliveryAppSales)})\n`;
+
+  if (settlement.topProducts && settlement.topProducts.length > 0) {
+    msg += `\n🏆 *Top Platos Más Vendidos:*\n`;
+    settlement.topProducts.slice(0, 3).forEach((p, idx) => {
+      msg += `${idx + 1}. ${p.name} — ${p.quantity} unds (${formatMoney(p.revenue)})\n`;
+    });
+  }
+
+  msg += `---------------------------------\n`;
+  msg += `🤝 *Comisión DonDomi:* 0% ($ 0 COP)\n`;
+  msg += `✨ *Generado por DonDomi POS (Valledupar)*`;
+
+  return encodeURIComponent(msg);
 }
 
 /**

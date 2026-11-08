@@ -114,7 +114,32 @@ export type OrderStatus =
   | 'DELIVERED'          // Entregado con éxito
   | 'CANCELLED';         // Cancelado
 
-export type PaymentMethod = 'EFECTIVO' | 'CASH' | 'NEQUI' | 'BRE_B' | 'DAVIPLATA' | 'CARD';
+export type OrderChannel = 'delivery_app' | 'pos_local' | 'pos_takeout';
+
+export type TransferPlatform = 'Nequi' | 'Daviplata' | 'Bancolombia' | 'Datáfono';
+
+export type LoyaltyTier = 'Bronce' | 'Plata' | 'Oro' | 'VIP';
+
+export interface LoyaltyTierInfo {
+  tier: LoyaltyTier | 'Nuevo';
+  deliveredOrdersCount: number;
+  orderCount?: number;
+  label: string;
+  badgeClass: string;
+  icon: string;
+  discountMessage?: string;
+}
+
+export type PaymentMethod =
+  | 'EFECTIVO'
+  | 'CASH'
+  | 'NEQUI'
+  | 'BRE_B'
+  | 'DAVIPLATA'
+  | 'CARD'
+  | 'TRANSFERENCIA'
+  | 'DIVIDIDO';
+
 export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
 
 export interface SelectedOption {
@@ -162,6 +187,13 @@ export interface Order {
   deliveryFleet?: 'DONDOMI' | 'PROPIO';
   rating?: number;
   reviewComment?: string;
+  // Campos del Sistema POS Híbrido DonDomi
+  orderChannel?: OrderChannel; // 'delivery_app' | 'pos_local' | 'pos_takeout'
+  tableNumber?: string; // Ej: "Mesa 4", "Barra 1" (para pos_local)
+  isSplitPayment?: boolean;
+  cashAmount?: number;
+  transferAmount?: number;
+  transferPlatform?: TransferPlatform;
 }
 
 export interface Driver {
