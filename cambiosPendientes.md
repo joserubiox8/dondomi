@@ -28,6 +28,21 @@ Este archivo actúa como bitácora viva de mejoras, optimizaciones y ajustes ide
      - Mantener estricto apego a la regla de imparcialidad (cero etiquetas engañosas de "Destacado").
 * **Fecha de registro**: 2026-11-07.
 
+### ⏳ Item 1.2: Carga Bajo Demanda de Menús por Restaurante (On-Demand / Lazy Loading)
+* **Ubicación**: `src/context/AppContext.tsx`, `src/services/dataService.ts` y `src/app/restaurant/[id]/RestaurantView.tsx`.
+* **Problema identificado**: Actualmente `AppContext` descarga la tabla completa de productos de todos los restaurantes de la ciudad (`supabase.from('products').select('*')`) al abrir la página principal. Además, el estado inicial carga en memoria un objeto estático (`INITIAL_PRODUCTS`) con los menús de todos los comercios. Cuando la plataforma escale a decenas o cientos de restaurantes en Valledupar, provocará la descarga innecesaria de miles de platos, saturando los datos móviles (4G/LTE) del usuario y ralentizando el inicio de la app.
+* **Solución a implementar**:
+  1. **Remover la descarga global de productos en el arranque de la app**:
+     - El Home y `AppContext` solo deben cargar restaurantes y categorías de la ciudad; nunca platos.
+  2. **Consulta puntual al entrar al comercio**:
+     - Al abrir `/restaurant/[id]`, realizar una consulta filtrada y eficiente en Supabase:
+       `supabase.from('products').select('*').eq('restaurant_id', id).eq('is_archived', false)`.
+  3. **Caché en memoria por sesión**:
+     - Almacenar los menús ya consultados en memoria (`Record<restaurantId, Product[]>`) para que si el cliente regresa al mismo restaurante en la misma visita, no vuelva a consultar la red ni a consumir datos móviles.
+  4. **Feedback visual de carga**:
+     - Mostrar un esqueleto de carga (*skeleton loader*) sobrio mientras se obtienen los platos del restaurante seleccionado.
+* **Fecha de registro**: 2026-11-08.
+
 ---
 
 ## 2. Simplificación de Interfaz y Experiencia de Usuario (Home / Header)
@@ -64,3 +79,21 @@ Este archivo actúa como bitácora viva de mejoras, optimizaciones y ajustes ide
 * **Fecha de registro**: 2026-11-07.
 
 ---
+
+## 3. Experiencia de Compra y Selección de Platos (Carta / Modal)
+
+### ⏳ Item 3.1: Reseteo Automático del Formulario de Plato al Abrir el Modal ("Instrucciones a la Cocina")
+* **Ubicación**: `src/components/restaurant/ProductModal.tsx` y `src/app/restaurant/[id]/RestaurantView.tsx`.
+* **Problema identificado**: Al agregar un plato con notas especiales (ej. "sin cebolla") y luego tocar otro plato diferente, el modal conserva el texto anterior en el campo *"Instrucciones especiales para la cocina"*. Esto sucede porque el componente `ProductModal` mantiene su estado interno persistente en memoria (`useState` de `notes`, `quantity`, `selectedByGroup` y `modalError`) y no se reinicializa al cambiar de plato (`activeModalProduct`).
+* **Riesgo operativo**: El cliente puede enviar accidentalmente observaciones de un plato anterior al nuevo producto, causando confusiones graves en la cocina del restaurante.
+* **Solución a implementar**:
+  - Añadir un efecto `useEffect` en `ProductModal.tsx` indexado al identificador del producto (`product?.id`) que limpie y reinicialice todos los estados locales a sus valores por defecto cada vez que se abra o cambie el plato:
+    - `setQuantity(1)`
+    - `setSelectedByGroup({})`
+    - `setNotes('')`
+    - `setModalError(null)`
+  - O bien, forzar la recreación del ciclo de vida del componente mediante `key={activeModalProduct?.id}` desde `RestaurantView.tsx`.
+* **Fecha de registro**: 2026-11-08.
+
+---
+
