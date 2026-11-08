@@ -3,10 +3,12 @@ import SearchBar from '@/components/home/SearchBar';
 import ActiveOrderBanner from '@/components/home/ActiveOrderBanner';
 import CategoryChips from '@/components/home/CategoryChips';
 import RestaurantList from '@/components/home/RestaurantList';
+import RestaurantDirectRedirect from '@/components/home/RestaurantDirectRedirect';
 
 export default function HomePage() {
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 flex flex-col">
+      <RestaurantDirectRedirect />
       <Header />
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-4 space-y-5 overflow-x-hidden">

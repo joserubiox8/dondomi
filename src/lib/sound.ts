@@ -50,3 +50,54 @@ export function playOrderAlertSound() {
     console.warn('No se pudo reproducir el sonido de alerta:', err);
   }
 }
+
+/**
+ * Campanada doble cristalina de cocina / restaurante ("Ding-Ding!")
+ * Sintetizada en Web Audio API con armónicos de campana de bronce.
+ */
+export function playKitchenBellChime() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const playStrike = (startTime: number, baseFreq: number) => {
+      // Tono principal
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(baseFreq, startTime);
+
+      // Armónico metálico superior
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(baseFreq * 2.76, startTime);
+
+      // Envolvente de decaimiento
+      gain1.gain.setValueAtTime(0.4, startTime);
+      gain1.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.65);
+
+      gain2.gain.setValueAtTime(0.15, startTime);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.35);
+
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+
+      osc1.start(startTime);
+      osc1.stop(startTime + 0.7);
+
+      osc2.start(startTime);
+      osc2.stop(startTime + 0.4);
+    };
+
+    const now = ctx.currentTime;
+    playStrike(now, 1046.5);         // C6
+    playStrike(now + 0.22, 1318.5);   // E6
+  } catch (err) {
+    console.warn('No se pudo reproducir el timbre de cocina:', err);
+  }
+}
+

@@ -36,17 +36,29 @@ import {
   Minus,
   Receipt,
   Sparkles,
+  QrCode,
+  Maximize2,
+  Minimize2,
+  Volume2,
+  VolumeX,
+  Flame,
+  Copy,
+  Download,
+  MessageSquare,
+  Bell,
 } from 'lucide-react';
+import QRCode from 'qrcode';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
 import {
   filterOrdersByPeriod,
   calculateRestaurantSettlement,
   generateWhatsAppSettlementMessage,
+  generateCustomerOrderStatusWhatsAppMessage,
   SettlementPeriod,
 } from '@/lib/pricing';
 import { getCustomerLoyaltyTier } from '@/services/dataService';
-import { playOrderAlertSound } from '@/lib/sound';
+import { playOrderAlertSound, playKitchenBellChime } from '@/lib/sound';
 import {
   Order,
   Product,
@@ -110,8 +122,19 @@ export default function MerchantPage() {
   const [activeTab, setActiveTab] = useState<MerchantTab>('KDS');
   const [kdsFilter, setKdsFilter] = useState<KdsFilter>('ACTIVOS');
   const [kdsSearch, setKdsSearch] = useState<string>('');
-  const [audioEnabled] = useState<boolean>(true);
+  const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const prevPendingCountRef = useRef<number>(0);
+
+  // Estados para Modo Pantalla de Cocina (KDS Fullscreen) & SLA
+  const [isKdsFullscreen, setIsKdsFullscreen] = useState<boolean>(false);
+  const [kdsStationFilter, setKdsStationFilter] = useState<'TODOS' | 'LOCAL' | 'DOMI'>('TODOS');
+  const [autoPrintOnAccept, setAutoPrintOnAccept] = useState<boolean>(false);
+  const [liveCurrentTime, setLiveCurrentTime] = useState<number>(Date.now());
+
+  // Estados para Generador de Código QR & Hablador de Mesa
+  const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [printingQrStand, setPrintingQrStand] = useState<boolean>(false);
 
   // Modal para ticket térmico de comanda o cierre de caja
   const [ticketOrder, setTicketOrder] = useState<Order | null>(null);
@@ -449,17 +472,137 @@ export default function MerchantPage() {
     return matchesTab && matchesSearch;
   });
 
-  // Alerta sonora en tiempo real cuando llega un nuevo pedido PENDING
+  // Actualización del cronómetro en vivo para SLA de cocina (cada 5 segundos)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLiveCurrentTime(Date.now());
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Atajo de teclado para salir de KDS Fullscreen o cerrar modales con tecla Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isKdsFullscreen) setIsKdsFullscreen(false);
+        if (isQrModalOpen) setIsQrModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isKdsFullscreen, isQrModalOpen]);
+
+  // Generación reactiva de código QR nítido para la mesa / tienda
+  useEffect(() => {
+    if (isQrModalOpen && restaurant?.id && typeof window !== 'undefined') {
+      const directUrl = `${window.location.origin}/restaurant/${restaurant.id}`;
+      QRCode.toDataURL(directUrl, {
+        width: 500,
+        margin: 2,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff',
+        },
+      })
+        .then((url) => setQrDataUrl(url))
+        .catch((err) => console.error('Error al generar código QR:', err));
+    }
+  }, [isQrModalOpen, restaurant?.id]);
+
+  // Alerta sonora en tiempo real (Campanada Doble de Cocina) cuando llega un nuevo pedido PENDING
   useEffect(() => {
     const currentPendingCount = pendingOrders.length;
     if (audioEnabled && currentPendingCount > prevPendingCountRef.current) {
-      playOrderAlertSound();
+      playKitchenBellChime();
     }
     prevPendingCountRef.current = currentPendingCount;
   }, [pendingOrders.length, audioEnabled]);
 
+  // Pedidos activos para pantalla KDS de Cocina (PENDING, PREPARING, READY_FOR_PICKUP)
+  const activeKdsOrders = useMemo(() => {
+    return restaurantOrders.filter((o) => {
+      const isActiveStatus =
+        o.status === 'PENDING' || o.status === 'PREPARING' || o.status === 'READY_FOR_PICKUP';
+      if (!isActiveStatus) return false;
+
+      if (kdsStationFilter === 'LOCAL') {
+        return o.orderChannel === 'pos_local' || o.orderChannel === 'pos_takeout';
+      }
+      if (kdsStationFilter === 'DOMI') {
+        return o.orderChannel === 'delivery_app' || !o.orderChannel;
+      }
+      return true;
+    });
+  }, [restaurantOrders, kdsStationFilter]);
+
+  const activeLocalOrdersCount = useMemo(() => {
+    return restaurantOrders.filter(
+      (o) =>
+        (o.status === 'PENDING' || o.status === 'PREPARING' || o.status === 'READY_FOR_PICKUP') &&
+        (o.orderChannel === 'pos_local' || o.orderChannel === 'pos_takeout')
+    ).length;
+  }, [restaurantOrders]);
+
+  const activeDeliveryOrdersCount = useMemo(() => {
+    return restaurantOrders.filter(
+      (o) =>
+        (o.status === 'PENDING' || o.status === 'PREPARING' || o.status === 'READY_FOR_PICKUP') &&
+        (o.orderChannel === 'delivery_app' || !o.orderChannel)
+    ).length;
+  }, [restaurantOrders]);
+
+  const getOrderSlaMinutes = (createdAt: string) => {
+    const diff = liveCurrentTime - new Date(createdAt).getTime();
+    return Math.max(0, Math.floor(diff / 60000));
+  };
+
+  const renderSlaBadge = (createdAt: string, isKdsMode = false) => {
+    const mins = getOrderSlaMinutes(createdAt);
+    if (mins < 10) {
+      return (
+        <span
+          className={`inline-flex items-center gap-1 font-black rounded-lg ${
+            isKdsMode
+              ? 'px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs'
+              : 'px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[11px]'
+          }`}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          ⏱️ {mins}m en cola
+        </span>
+      );
+    }
+    if (mins <= 15) {
+      return (
+        <span
+          className={`inline-flex items-center gap-1 font-black rounded-lg ${
+            isKdsMode
+              ? 'px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs'
+              : 'px-2 py-0.5 bg-amber-100 text-amber-800 text-[11px]'
+          }`}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+          ⚠️ {mins}m de espera
+        </span>
+      );
+    }
+    return (
+      <span
+        className={`inline-flex items-center gap-1 font-black rounded-lg animate-pulse ${
+          isKdsMode
+            ? 'px-3 py-1 bg-rose-500/30 text-rose-300 border border-rose-500/60 text-xs'
+            : 'px-2 py-0.5 bg-rose-100 text-rose-800 text-[11px]'
+        }`}
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+        🚨 {mins}m demorado
+      </span>
+    );
+  };
+
   const handlePrintTicket = (order: Order) => {
     setPrintingSettlement(false);
+    setPrintingQrStand(false);
     setTicketOrder(order);
     setTimeout(() => {
       window.print();
@@ -468,10 +611,50 @@ export default function MerchantPage() {
 
   const handlePrintSettlement = () => {
     setTicketOrder(null);
+    setPrintingQrStand(false);
     setPrintingSettlement(true);
     setTimeout(() => {
       window.print();
     }, 250);
+  };
+
+  const handlePrintQrStand = () => {
+    setTicketOrder(null);
+    setPrintingSettlement(false);
+    setPrintingQrStand(true);
+    setTimeout(() => {
+      window.print();
+    }, 250);
+  };
+
+  const handleDownloadQrPng = () => {
+    if (!qrDataUrl) return;
+    const link = document.createElement('a');
+    link.href = qrDataUrl;
+    link.download = `dondomi-${(restaurant?.name || 'restaurante').toLowerCase().replace(/\s+/g, '-')}-qr.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showNotice('✅ Imagen QR descargada con éxito');
+  };
+
+  const handleCopyStoreLink = async () => {
+    if (typeof window === 'undefined' || !restaurant?.id) return;
+    const directUrl = `${window.location.origin}/restaurant/${restaurant.id}`;
+    try {
+      await navigator.clipboard.writeText(directUrl);
+      showNotice('📋 Enlace de tu restaurante copiado al portapapeles');
+    } catch {
+      showNotice('⚠️ Copia el enlace directamente desde el campo de texto');
+    }
+  };
+
+  const handleAcceptOrder = async (order: Order) => {
+    await updateOrderStatus(order.id, 'PREPARING');
+    showNotice(`🔥 Pedido ${order.orderNumber} en preparación en cocina`);
+    if (autoPrintOnAccept) {
+      handlePrintTicket(order);
+    }
   };
 
   // Toggle rápido maestro de Abierto/Cerrado (verificado en Supabase)
@@ -1172,6 +1355,26 @@ export default function MerchantPage() {
           {/* Estado de Apertura y Salir */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
+              type="button"
+              onClick={() => setIsQrModalOpen(true)}
+              className="bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+              title="Ver código QR y enlace directo de mi tienda para Instagram/WhatsApp"
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Mi QR & Link</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsKdsFullscreen(true)}
+              className="bg-orange-600 hover:bg-orange-500 text-white px-3 py-1.5 rounded-full text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-orange-600/30 cursor-pointer"
+              title="Abrir modo pantalla completa para monitores o tablets en cocina"
+            >
+              <Flame className="w-3.5 h-3.5 text-amber-300" />
+              <span className="hidden sm:inline">Pantalla KDS</span>
+            </button>
+
+            <button
               onClick={handleToggleOpenClose}
               className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
                 restaurant.isOpen
@@ -1356,6 +1559,37 @@ export default function MerchantPage() {
               </button>
             </div>
 
+            {/* Banner Acceso Rápido a Modo Pantalla de Cocina (KDS Fullscreen) */}
+            <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-orange-950 p-4 rounded-3xl text-white shadow-md flex flex-col sm:flex-row items-center justify-between gap-3 border border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-orange-600/30 border border-orange-500/40 flex items-center justify-center shrink-0">
+                  <Flame className="w-5 h-5 text-orange-400 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-white flex items-center gap-2">
+                    <span>Modo Pantalla Cocina (KDS Fullscreen)</span>
+                    <span className="text-[10px] bg-orange-500/30 text-orange-300 font-extrabold px-2 py-0.5 rounded-full border border-orange-400/30">
+                      Para Monitor / Tablet
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Vista Dark UI de alto contraste con cronómetro SLA, campanada sonora en vivo y botones táctiles gigantes.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsKdsFullscreen(true)}
+                  className="w-full sm:w-auto bg-orange-600 hover:bg-orange-500 text-white font-black text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-orange-600/20 cursor-pointer active:scale-95"
+                >
+                  <Maximize2 className="w-4 h-4" />
+                  <span>Abrir Pantalla Completa</span>
+                </button>
+              </div>
+            </div>
+
             {/* Buscador de Comandas */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
@@ -1461,16 +1695,25 @@ export default function MerchantPage() {
                             >
                               ({order.customerPhone})
                             </a>
-                            <a
-                              href={`https://wa.me/57${order.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                                `Hola ${order.customerName}, te escribimos de ${restaurant.name} sobre tu pedido ${order.orderNumber} en DonDomi.`
-                              )}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-lg font-bold hover:bg-emerald-100"
-                            >
-                              WhatsApp
-                            </a>
+
+                            {/* Semáforo SLA de Tiempo */}
+                            {renderSlaBadge(order.createdAt)}
+
+                            {order.customerPhone && order.customerPhone.replace(/\D/g, '') !== '0000000000' && order.customerPhone.replace(/\D/g, '').length === 10 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const msg = generateCustomerOrderStatusWhatsAppMessage(order, restaurant.name, orderLoyalty);
+                                  const clean = order.customerPhone.replace(/\D/g, '');
+                                  window.open(`https://wa.me/57${clean}?text=${encodeURIComponent(msg)}`, '_blank');
+                                }}
+                                className="text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold px-2.5 py-1 rounded-xl transition flex items-center gap-1 cursor-pointer"
+                                title="Notificar estado al cliente por WhatsApp en 1 clic"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Avisar WhatsApp</span>
+                              </button>
+                            )}
                           </div>
 
                           <div className="flex items-center gap-2">
@@ -1586,7 +1829,7 @@ export default function MerchantPage() {
                           {isNew && (
                             <div className="flex-1 flex flex-wrap gap-2">
                               <button
-                                onClick={() => updateOrderStatus(order.id, 'PREPARING')}
+                                onClick={() => handleAcceptOrder(order)}
                                 className="flex-1 bg-orange-600 hover:bg-orange-500 text-white font-black py-2.5 px-4 rounded-xl text-xs transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
                               >
                                 <ChefHat className="w-4 h-4" />
@@ -4022,6 +4265,540 @@ export default function MerchantPage() {
       )}
 
       {/* ============================================================== */}
+      {/* PANTALLA COMPLETA DE COCINA (KDS FULLSCREEN) */}
+      {/* ============================================================== */}
+      {isKdsFullscreen && (
+        <div className="fixed inset-0 z-50 bg-slate-950 text-white flex flex-col overflow-hidden select-none animate-in fade-in">
+          {/* Top Bar KDS */}
+          <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+            {/* Restaurant brand & live clock */}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-600 flex items-center justify-center text-white font-black shadow-md shadow-orange-600/30">
+                <Flame className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase font-black tracking-widest text-orange-400 bg-orange-950/70 border border-orange-500/40 px-2 py-0.5 rounded-full">
+                    KDS Cocina Fullscreen
+                  </span>
+                  <span className="text-xs font-mono font-bold text-slate-400">
+                    {new Date(liveCurrentTime).toLocaleTimeString('es-CO')}
+                  </span>
+                </div>
+                <h2 className="text-base font-black text-white tracking-tight leading-none mt-0.5">
+                  {restaurant.name}
+                </h2>
+              </div>
+            </div>
+
+            {/* Station Filter Pills */}
+            <div className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700/80">
+              <button
+                type="button"
+                onClick={() => setKdsStationFilter('TODOS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
+                  kdsStationFilter === 'TODOS'
+                    ? 'bg-orange-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>Todos</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-slate-900/60 text-[10px]">
+                  {restaurantOrders.filter(o => o.status === 'PENDING' || o.status === 'PREPARING' || o.status === 'READY_FOR_PICKUP').length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setKdsStationFilter('LOCAL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
+                  kdsStationFilter === 'LOCAL'
+                    ? 'bg-orange-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>🍽️ Mesa/Mostrador</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-slate-900/60 text-[10px]">
+                  {activeLocalOrdersCount}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setKdsStationFilter('DOMI')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 ${
+                  kdsStationFilter === 'DOMI'
+                    ? 'bg-orange-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>🛵 Domicilios App</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-slate-900/60 text-[10px]">
+                  {activeDeliveryOrdersCount}
+                </span>
+              </button>
+            </div>
+
+            {/* Actions, sound, print and exit */}
+            <div className="flex items-center gap-2">
+              {/* Sonido toggle y test */}
+              <button
+                type="button"
+                onClick={() => {
+                  setAudioEnabled(!audioEnabled);
+                  if (!audioEnabled) {
+                    playKitchenBellChime();
+                  }
+                }}
+                className={`p-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                  audioEnabled
+                    ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/60'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                }`}
+                title={audioEnabled ? 'Sonido de timbre activado' : 'Sonido silenciado'}
+              >
+                {audioEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+                <span className="hidden sm:inline">{audioEnabled ? 'Timbre Activo' : 'Silencio'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => playKitchenBellChime()}
+                className="p-2 rounded-xl text-xs font-bold bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 transition cursor-pointer"
+                title="Probar sonido campanada doble de cocina"
+              >
+                <Bell className="w-4 h-4" />
+              </button>
+
+              {/* Auto-print toggle */}
+              <button
+                type="button"
+                onClick={() => setAutoPrintOnAccept(!autoPrintOnAccept)}
+                className={`p-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer ${
+                  autoPrintOnAccept
+                    ? 'bg-sky-950/60 border-sky-500/40 text-sky-400 hover:bg-sky-900/60'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                }`}
+                title="Imprimir comanda térmica automáticamente al aceptar"
+              >
+                <Printer className="w-4 h-4" />
+                <span className="hidden md:inline">
+                  {autoPrintOnAccept ? 'Auto-Imprimir: SÍ' : 'Auto-Imprimir: NO'}
+                </span>
+              </button>
+
+              {/* Salir de KDS */}
+              <button
+                type="button"
+                onClick={() => setIsKdsFullscreen(false)}
+                className="bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-200 border border-slate-700 hover:border-rose-500/50 p-2 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer"
+                title="Salir del Modo KDS Pantalla Completa (o presiona tecla ESC)"
+              >
+                <Minimize2 className="w-4 h-4" />
+                <span className="hidden sm:inline">Salir KDS (ESC)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Grid de Comandas KDS */}
+          <div className="flex-1 overflow-y-auto p-4 bg-slate-950">
+            {activeKdsOrders.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-500">
+                <div className="w-20 h-20 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mb-4 text-emerald-400 shadow-xl">
+                  <CheckCircle2 className="w-10 h-10" />
+                </div>
+                <h3 className="text-xl font-black text-slate-200">¡Cocina al Día!</h3>
+                <p className="text-xs text-slate-400 max-w-sm mt-1">
+                  No hay comandas activas pendientes de preparación en este momento. Cuando entre un pedido, sonará automáticamente la campanada de cocina.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => playKitchenBellChime()}
+                  className="mt-5 px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-xs font-bold text-slate-300 transition flex items-center gap-2 cursor-pointer"
+                >
+                  <Bell className="w-4 h-4 text-orange-400" />
+                  <span>Probar timbre de cocina</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+                {activeKdsOrders.map((order) => {
+                  const orderLoyalty = getCustomerLoyaltyTier(order.customerPhone, orders);
+                  const cleanPhone = (order.customerPhone || '').replace(/\D/g, '');
+                  const canSendWhatsApp = cleanPhone.length === 10 && cleanPhone !== '0000000000';
+
+                  const isPending = order.status === 'PENDING';
+                  const isPreparing = order.status === 'PREPARING';
+                  const isReady = order.status === 'READY_FOR_PICKUP';
+
+                  return (
+                    <div
+                      key={order.id}
+                      className={`rounded-2xl border-2 flex flex-col justify-between overflow-hidden transition-all shadow-xl ${
+                        isPending
+                          ? 'bg-amber-950/20 border-amber-500/80 shadow-amber-500/10'
+                          : isPreparing
+                          ? 'bg-slate-900 border-sky-500/80 shadow-sky-500/10'
+                          : 'bg-emerald-950/20 border-emerald-500/80 shadow-emerald-500/10'
+                      }`}
+                    >
+                      {/* Header de la comanda */}
+                      <div className="p-3.5 border-b border-slate-800/80 bg-slate-900/60 flex flex-col gap-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl font-black text-white tracking-tight">
+                              #{order.orderNumber}
+                            </span>
+                            <span
+                              className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
+                                isPending
+                                  ? 'bg-amber-500 text-slate-950'
+                                  : isPreparing
+                                  ? 'bg-sky-500 text-slate-950'
+                                  : 'bg-emerald-500 text-slate-950'
+                              }`}
+                            >
+                              {isPending ? 'Nuevo' : isPreparing ? 'En Cocina' : 'Listo'}
+                            </span>
+                          </div>
+
+                          {/* Semáforo SLA de Tiempo */}
+                          <div>{renderSlaBadge(order.createdAt, true)}</div>
+                        </div>
+
+                        {/* Canal y Datos del Cliente */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            {order.orderChannel === 'pos_local' ? (
+                              <span className="bg-purple-900/80 text-purple-200 border border-purple-500/40 px-2 py-0.5 rounded-lg font-black text-[11px] flex items-center gap-1">
+                                🍽️ Mesa {order.tableNumber || 'Local'}
+                              </span>
+                            ) : order.orderChannel === 'pos_takeout' ? (
+                              <span className="bg-indigo-900/80 text-indigo-200 border border-indigo-500/40 px-2 py-0.5 rounded-lg font-black text-[11px] flex items-center gap-1">
+                                🛍️ Para Llevar
+                              </span>
+                            ) : (
+                              <span className="bg-amber-900/80 text-amber-200 border border-amber-500/40 px-2 py-0.5 rounded-lg font-black text-[11px] flex items-center gap-1">
+                                🛵 Domicilio DonDomi
+                              </span>
+                            )}
+
+                            {orderLoyalty && orderLoyalty.tier !== 'Nuevo' && (
+                              <span
+                                className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${orderLoyalty.badgeClass}`}
+                              >
+                                {orderLoyalty.icon} {orderLoyalty.label}
+                              </span>
+                            )}
+                          </div>
+
+                          <span className="text-slate-400 font-bold truncate max-w-[130px]">
+                            {order.customerName}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Cuerpo con los Platos a Cocinar */}
+                      <div className="p-3.5 space-y-3 flex-1 overflow-y-auto max-h-[360px]">
+                        <div className="space-y-2">
+                          {order.items.map((it) => (
+                            <div
+                              key={it.id}
+                              className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 space-y-1"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-start gap-2">
+                                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 font-black text-sm px-2 py-0.5 rounded-lg">
+                                    {it.quantity}x
+                                  </span>
+                                  <span className="font-bold text-white text-sm leading-snug">
+                                    {it.productName}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {it.selectedOptions && it.selectedOptions.length > 0 && (
+                                <div className="text-xs text-slate-400 pl-8 space-y-0.5">
+                                  {it.selectedOptions.map((opt, optIdx) => (
+                                    <p key={`${opt.groupName}-${opt.itemName}-${optIdx}`} className="text-slate-300">
+                                      + {opt.itemName}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+
+                              {it.notes && (
+                                <p className="text-xs text-amber-300 font-medium italic pl-8 bg-amber-950/40 border-l-2 border-amber-500 py-0.5 px-1.5 rounded-r">
+                                  Nota: &quot;{it.notes}&quot;
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {order.customerNotes && (
+                          <div className="bg-amber-950/60 border border-amber-600/50 p-2.5 rounded-xl text-xs text-amber-200">
+                            <span className="font-black text-amber-400 block mb-0.5">
+                              ⚠️ Nota del cliente:
+                            </span>
+                            &quot;{order.customerNotes}&quot;
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer con Acciones Táctiles Gigantes */}
+                      <div className="p-3 bg-slate-900/90 border-t border-slate-800 space-y-2">
+                        {/* Botones principales de avance de estado */}
+                        {isPending && (
+                          <div className="grid grid-cols-3 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleAcceptOrder(order)}
+                              className="col-span-2 bg-orange-600 hover:bg-orange-500 text-white font-black py-3 px-3 rounded-xl text-sm transition shadow-lg flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <ChefHat className="w-5 h-5" />
+                              <span>Cocinar</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenRejectModal(order)}
+                              className="bg-slate-800 hover:bg-rose-950/80 text-rose-300 border border-slate-700 hover:border-rose-500/40 font-bold py-3 px-2 rounded-xl text-xs transition flex items-center justify-center cursor-pointer"
+                            >
+                              Rechazar
+                            </button>
+                          </div>
+                        )}
+
+                        {isPreparing && (
+                          <div className="space-y-1.5">
+                            {order.orderChannel === 'pos_local' ? (
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => updateOrderStatus(order.id, 'DELIVERED')}
+                                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-2 rounded-xl text-xs transition flex items-center justify-center gap-1 cursor-pointer shadow-md"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  <span>Servir en Mesa</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateOrderStatus(order.id, 'READY_FOR_PICKUP')}
+                                  className="bg-amber-600 hover:bg-amber-500 text-white font-black py-3 px-2 rounded-xl text-xs transition flex items-center justify-center gap-1 cursor-pointer shadow-md"
+                                >
+                                  <PackageCheck className="w-4 h-4" />
+                                  <span>Listo en Barra</span>
+                                </button>
+                              </div>
+                            ) : order.orderChannel === 'pos_takeout' ? (
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => updateOrderStatus(order.id, 'DELIVERED')}
+                                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-2 rounded-xl text-xs transition flex items-center justify-center gap-1 cursor-pointer shadow-md"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  <span>Entregar Cliente</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateOrderStatus(order.id, 'READY_FOR_PICKUP')}
+                                  className="bg-amber-600 hover:bg-amber-500 text-white font-black py-3 px-2 rounded-xl text-xs transition flex items-center justify-center gap-1 cursor-pointer shadow-md"
+                                >
+                                  <PackageCheck className="w-4 h-4" />
+                                  <span>Listo en Barra</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => updateOrderStatus(order.id, 'READY_FOR_PICKUP')}
+                                className="w-full bg-amber-600 hover:bg-amber-500 text-white font-black py-3 px-3 rounded-xl text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                              >
+                                <PackageCheck className="w-5 h-5" />
+                                <span>Empacado / Listo para Domiciliario</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {isReady && (
+                          <div className="space-y-1.5">
+                            {order.orderChannel === 'pos_local' || order.orderChannel === 'pos_takeout' ? (
+                              <button
+                                type="button"
+                                onClick={() => updateOrderStatus(order.id, 'DELIVERED')}
+                                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-3 rounded-xl text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                              >
+                                <CheckCircle2 className="w-5 h-5" />
+                                <span>Completar Entrega</span>
+                              </button>
+                            ) : (
+                              <div className="bg-slate-950/70 border border-slate-800 p-2.5 rounded-xl text-center text-xs text-amber-300 font-bold flex items-center justify-center gap-1.5">
+                                <Bike className="w-4 h-4 text-amber-400" />
+                                <span>Esperando Retiro por Domiciliario</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Acciones auxiliares: ticket térmico y notificación WhatsApp */}
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
+                          <button
+                            type="button"
+                            onClick={() => handlePrintTicket(order)}
+                            className="py-1.5 px-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center justify-center gap-1 cursor-pointer"
+                            title="Imprimir comanda térmica"
+                          >
+                            <Printer className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Comanda</span>
+                          </button>
+
+                          {canSendWhatsApp ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const msg = generateCustomerOrderStatusWhatsAppMessage(order, restaurant.name, orderLoyalty);
+                                window.open(`https://wa.me/57${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+                              }}
+                              className="py-1.5 px-2 rounded-lg text-xs font-extrabold bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/40 transition flex items-center justify-center gap-1 cursor-pointer"
+                              title="Avisar al cliente por WhatsApp"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>WhatsApp</span>
+                            </button>
+                          ) : (
+                            <div className="py-1.5 px-2 rounded-lg text-[11px] font-medium text-slate-500 bg-slate-950 text-center flex items-center justify-center">
+                              <span>Sin WhatsApp</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL CÓDIGO QR Y ENLACE DIRECTO DE MI TIENDA */}
+      {/* ============================================================== */}
+      {isQrModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-8">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                  <QrCode className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg text-slate-900 leading-tight">
+                    Mi Código QR y Enlace Directo
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Comparte tu carta en redes o colócala en las mesas de tu local
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsQrModalOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Enlace Directo de la Tienda */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-slate-700 uppercase tracking-wider">
+                Enlace Directo de tu Carta (Bio de Instagram / WhatsApp):
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={typeof window !== 'undefined' ? `${window.location.origin}/restaurant/${restaurant.id}` : ''}
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 outline-none select-all"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyStoreLink}
+                  className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Copiar enlace directo"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copiar</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Tus clientes pueden pedir sin descargar apps pesadas ni crear cuentas obligatorias.
+              </p>
+            </div>
+
+            {/* Tarjeta Visual de Hablador / Stand de Mesa */}
+            <div className="bg-gradient-to-b from-slate-50 to-orange-50/40 rounded-2xl p-4 border border-orange-100 text-center space-y-3">
+              <div className="inline-block bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full">
+                Hablador de Mesa Oficial · DonDomi
+              </div>
+
+              <h4 className="text-xl font-black text-slate-900 uppercase tracking-tight">
+                {restaurant.name}
+              </h4>
+
+              <div className="flex justify-center py-2">
+                {qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt={`QR ${restaurant.name}`}
+                    className="w-48 h-48 rounded-2xl border-4 border-white shadow-lg bg-white p-2 object-contain"
+                  />
+                ) : (
+                  <div className="w-48 h-48 border-2 border-dashed border-slate-300 rounded-2xl flex items-center justify-center text-xs text-slate-400">
+                    Generando QR...
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-orange-600">
+                  ¡Escanea y pide sin filas!
+                </p>
+                <p className="text-[11px] text-slate-600 mt-0.5">
+                  Pide a domicilio o en mesa con DonDomi Valledupar
+                </p>
+              </div>
+            </div>
+
+            {/* Botones de Acción */}
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={handlePrintQrStand}
+                className="py-3 px-3 rounded-xl text-xs font-black bg-orange-600 hover:bg-orange-500 text-white transition flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-orange-600/20"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Hablador</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadQrPng}
+                className="py-3 px-3 rounded-xl text-xs font-black bg-slate-900 hover:bg-slate-800 text-white transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+              >
+                <Download className="w-4 h-4" />
+                <span>Descargar PNG</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
       {/* DIÁLOGO IMPRESIÓN COMANDA TÉRMICA POS (58mm/80mm) */}
       {/* ============================================================== */}
       {ticketOrder && !printingSettlement && (
@@ -4181,6 +4958,52 @@ export default function MerchantPage() {
           <div className="text-center pt-2 text-[10px]">
             <p>*** DonDomi Valledupar ***</p>
             <p>Plataforma 100% Gratuita para Restaurantes</p>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* IMPRESIÓN HABLADOR DE MESA / STAND QR PARA CLIENTES */}
+      {/* ============================================================== */}
+      {printingQrStand && (
+        <div id="print-qr-stand" className="hidden print:flex flex-col items-center justify-center fixed inset-0 bg-white p-8 text-black text-center font-sans">
+          <div className="w-[85mm] max-w-sm border-4 border-slate-900 rounded-3xl p-6 flex flex-col items-center justify-between text-center mx-auto min-h-[140mm] shadow-none">
+            <div className="w-full pb-3 border-b-2 border-slate-900">
+              <span className="text-[11px] font-black tracking-widest uppercase bg-slate-900 text-white px-3 py-1 rounded-full">
+                DonDomi Valledupar
+              </span>
+              <h1 className="text-2xl font-black uppercase tracking-tight text-slate-950 mt-3 leading-tight">
+                {restaurant.name}
+              </h1>
+              <p className="text-xs font-bold text-slate-600 mt-1">
+                Carta Digital · Pedidos en Mesa y Domicilio
+              </p>
+            </div>
+
+            <div className="py-4 flex flex-col items-center justify-center">
+              <p className="text-xs font-black uppercase tracking-wider text-orange-600 mb-2">
+                ¡Escanea y pide sin filas!
+              </p>
+              {qrDataUrl ? (
+                <img
+                  src={qrDataUrl}
+                  alt={`QR ${restaurant.name}`}
+                  className="w-56 h-56 object-contain border-2 border-slate-200 rounded-2xl p-2 bg-white"
+                />
+              ) : (
+                <div className="w-56 h-56 border-2 border-dashed border-slate-300 rounded-2xl flex items-center justify-center text-xs text-slate-400">
+                  Cargando código QR...
+                </div>
+              )}
+              <p className="text-[11px] font-bold text-slate-700 mt-3 max-w-[220px]">
+                Apunta con la cámara de tu celular al código QR para ver el menú completo.
+              </p>
+            </div>
+
+            <div className="w-full pt-3 border-t-2 border-slate-900 text-[10px] space-y-0.5 text-slate-600">
+              <p className="font-extrabold text-slate-900">Pide fácil y apoya el comercio local</p>
+              <p>Valledupar, Cesar · www.dondomi.com</p>
+            </div>
           </div>
         </div>
       )}

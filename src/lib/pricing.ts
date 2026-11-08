@@ -7,7 +7,7 @@
  */
 
 import { CartItem } from '@/context/AppContext';
-import { Order, SelectedOption } from '@/types';
+import { Order, SelectedOption, LoyaltyTierInfo } from '@/types';
 
 export const DEFAULT_VALLEDUPAR_DELIVERY_FEE = 7000;
 export const DEFAULT_SERVICE_FEE = 0; // DonDomi mantiene $0 en cobros ocultos
@@ -445,3 +445,55 @@ export function calculateDriverSettlement(
     digitalDeliveryFeesOwedToDriver,
   };
 }
+
+/**
+ * Genera el mensaje dinámico de WhatsApp para notificar al cliente según el estado actual de su pedido.
+ */
+export function generateCustomerOrderStatusWhatsAppMessage(
+  order: Order,
+  restaurantName: string,
+  loyalty?: LoyaltyTierInfo | null
+): string {
+  const custName = (order.customerName || 'Cliente').trim();
+  const orderNum = order.orderNumber;
+  const totalFmt = `$${(order.total || 0).toLocaleString('es-CO')}`;
+
+  const channelText =
+    order.orderChannel === 'pos_local'
+      ? `en tu ${order.tableNumber || 'mesa'}`
+      : order.orderChannel === 'pos_takeout'
+      ? 'para llevar en mostrador'
+      : 'a domicilio DonDomi';
+
+  if (order.status === 'PREPARING') {
+    return `¡Hola ${custName}! 🍳 En *${restaurantName}* ya estamos preparando tu pedido #${orderNum} (${channelText}). Total: ${totalFmt}. ¡Estará listo muy pronto!`;
+  }
+
+  if (order.status === 'READY_FOR_PICKUP') {
+    if (order.orderChannel === 'pos_takeout') {
+      return `¡Hola ${custName}! 🛍️ Tu pedido #${orderNum} en *${restaurantName}* ya está LISTO para recoger en mostrador. ¡Te esperamos!`;
+    }
+    if (order.orderChannel === 'pos_local') {
+      return `¡Hola ${custName}! 🍽️ Tu pedido #${orderNum} en *${restaurantName}* ya va a tu ${order.tableNumber || 'mesa'}. ¡Buen provecho!`;
+    }
+    return `¡Hola ${custName}! 🛵 Tu pedido #${orderNum} de *${restaurantName}* ya está listo y asignado al domiciliario (${order.driverName || 'Flota DonDomi'}). Va en camino!`;
+  }
+
+  if (order.status === 'ON_THE_WAY') {
+    return `¡Hola ${custName}! 🛵 Tu pedido #${orderNum} de *${restaurantName}* ya va en camino con ${order.driverName || 'el repartidor'} hacia ${order.deliveryAddress?.street || 'tu dirección'}.`;
+  }
+
+  if (order.status === 'DELIVERED') {
+    const ordersCount = loyalty?.orderCount || loyalty?.deliveredOrdersCount || 1;
+    const tierName = loyalty?.tier && loyalty.tier !== 'Nuevo' ? loyalty.tier : 'Bronce';
+    return `¡Gracias por tu compra en *${restaurantName}*, ${custName}! ❤️ Con este pedido sumas ${ordersCount} compras (Nivel ${tierName}). ¡Buen provecho y esperamos que lo disfrutes!`;
+  }
+
+  if (order.status === 'CANCELLED') {
+    return `Hola ${custName}, te escribimos de *${restaurantName}*. Lamentamos informarte que tu pedido #${orderNum} no pudo ser atendido: ${order.cancellationReason || 'Sin existencias de ingredientes'}. Disculpa las molestias.`;
+  }
+
+  // PENDING / default
+  return `¡Hola ${custName}! Te escribimos de *${restaurantName}* sobre tu pedido #${orderNum} (${channelText}). Total: ${totalFmt}. ¡Gracias por preferirnos!`;
+}
+
