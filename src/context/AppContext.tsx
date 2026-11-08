@@ -272,9 +272,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedCategorySlug, setSelectedCategorySlug] = useState<string | null>(null);
   const [onlyOpenFilter, setOnlyOpenFilter] = useState<boolean>(false);
 
-  // Estados reactivos sincronizados con Supabase (con carga bajo demanda de menús)
+  // Estados reactivos sincronizados con Supabase y respaldo integral
   const [restaurants, setRestaurants] = useState<Restaurant[]>(INITIAL_RESTAURANTS);
-  const [productsByRestaurant, setProductsByRestaurant] = useState<Record<string, Product[]>>({});
+  const [productsByRestaurant, setProductsByRestaurant] = useState<Record<string, Product[]>>(INITIAL_PRODUCTS);
   const [loadingMenus, setLoadingMenus] = useState<Record<string, boolean>>({});
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
 
@@ -513,8 +513,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function loadData() {
       try {
-        const [restRes, orderRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
+        const [restRes, prodRes, orderRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
           dataService.getRestaurants(),
+          dataService.getProducts(),
           dataService.getOrders(),
           dataService.getCategories(),
           dataService.getDrivers(),
@@ -523,6 +524,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (restRes.status === 'fulfilled' && restRes.value.data.length > 0) {
           setRestaurants(restRes.value.data);
+        }
+        if (prodRes.status === 'fulfilled' && Object.keys(prodRes.value.data).length > 0) {
+          setProductsByRestaurant((prev) => ({
+            ...INITIAL_PRODUCTS,
+            ...prev,
+            ...prodRes.value.data,
+          }));
         }
         if (orderRes.status === 'fulfilled' && orderRes.value.data.length > 0) {
           setOrders(orderRes.value.data);
@@ -755,12 +763,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       lastRevalidation = now;
 
       try {
-        const [ordersRes, restRes, catRes, drvRes, cfgRes] = await Promise.allSettled([
+        const [ordersRes, restRes, catRes, drvRes, cfgRes, prodRes] = await Promise.allSettled([
           dataService.getOrders(),
           dataService.getRestaurants(),
           dataService.getCategories(),
           dataService.getDrivers(),
           dataService.getPlatformConfig(),
+          dataService.getProducts(),
         ]);
 
         if (ordersRes.status === 'fulfilled' && ordersRes.value.data.length > 0) {
@@ -768,6 +777,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         if (restRes.status === 'fulfilled' && restRes.value.data.length > 0) {
           setRestaurants(restRes.value.data);
+        }
+        if (prodRes.status === 'fulfilled' && Object.keys(prodRes.value.data).length > 0) {
+          setProductsByRestaurant((prev) => ({
+            ...INITIAL_PRODUCTS,
+            ...prev,
+            ...prodRes.value.data,
+          }));
         }
         if (catRes.status === 'fulfilled' && catRes.value.data.length > 0) {
           setCategories(catRes.value.data);
@@ -966,15 +982,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return cached;
     }
 
+    const fallbackItems = (INITIAL_PRODUCTS[restaurantId] || []).filter((p) => !p.isArchived);
     setLoadingMenus((prev) => ({ ...prev, [restaurantId]: true }));
     try {
       const res = await dataService.getProductsByRestaurant(restaurantId);
-      const items = res.data || [];
+      const items = res.data && res.data.length > 0 ? res.data : fallbackItems;
       setProductsByRestaurant((prev) => ({
         ...prev,
         [restaurantId]: items,
       }));
       return items;
+    } catch {
+      setProductsByRestaurant((prev) => ({
+        ...prev,
+        [restaurantId]: fallbackItems,
+      }));
+      return fallbackItems;
     } finally {
       setLoadingMenus((prev) => ({ ...prev, [restaurantId]: false }));
     }

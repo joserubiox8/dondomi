@@ -76,6 +76,31 @@ Este archivo actúa como bitácora viva de mejoras, optimizaciones y ajustes ide
 * **Solución implementada**:
   1. En `ProductModal.tsx`, se implementó un `useEffect` sincronizado con `product?.id` que reinicializa `notes = ''`, `quantity = 1`, `selectedByGroup = {}` y `modalError = null`.
   2. En `RestaurantView.tsx`, se forzó el ciclo de vida de React mediante `key={activeModalProduct?.id || 'product-modal-closed'}` para garantizar que el modal nazca completamente limpio al abrir un nuevo producto.
+### ✅ Item 3.2: Restauración Fiel de la Estructura Original de Portada y Perfil del Restaurante
+* **Ubicación**: `src/app/restaurant/[id]/RestaurantView.tsx`.
+* **Problema resuelto**: Se restauró la distribución original exacta de la cabecera del restaurante solicitada por el usuario (portada de ancho completo, logo centrado superpuesto sobre el borde inferior, información centrada y diseño visual intacto).
+* **Solución implementada**:
+  1. Portada *full-width* de borde a borde con gradiente cinematográfico y ocultamiento suave al hacer scroll.
+  2. Logo/foto de perfil en tarjeta blanca centrada (`-mt-12 flex flex-col items-center text-center`) sobre el borde inferior de la portada.
+  3. Insignia de estado "Abierto ahora" / "Cerrado", nombre, tags, descripción y píldoras de dirección y horarios centrados.
+  4. Barra fija de categorías en negro (`bg-slate-950`) con píldoras de navegación.
+* **Estado**: ✅ **Completado** (2026-11-08).
+
+### ✅ Item 3.3: Respaldo Íntegro de Platos y Menús Completos sin Omisiones
+* **Ubicación**: `src/context/AppContext.tsx`, `src/services/dataService.ts` y `src/app/restaurant/[id]/RestaurantView.tsx`.
+* **Problema resuelto**: Al entrar a un restaurante cargaba menos platos o quedaba en blanco debido a discrepancias entre la base de datos en nube y el catálogo integral inicial.
+* **Solución implementada**:
+  1. Se unificó el estado inicial de `productsByRestaurant` con `INITIAL_PRODUCTS`, combinando transparentemente las adiciones de Supabase sin anular los menús ricos existentes.
+  2. En `fetchProductsForRestaurant` y `RestaurantView.tsx` se garantizó fallback bidireccional a los platos activos de cada restaurante.
+* **Estado**: ✅ **Completado** (2026-11-08).
+
+### ✅ Item 1.3: Carga Inmediata y Persistente de Imágenes al Retroceder (Back Navigation)
+* **Ubicación**: `src/components/home/RestaurantList.tsx` y `src/components/home/RestaurantCard.tsx`.
+* **Problema resuelto**: Al volver atrás desde la página de un restaurante a la página principal, las imágenes de los comercios fallaban en mostrarse.
+* **Solución implementada**:
+  1. Se eliminó la paginación por cortes (`visibleCount`) y el `IntersectionObserver` que desmontaba tarjetas en la transición de ruta/bfcache.
+  2. Todos los restaurantes se renderizan de forma directa y estable, respetando la regla: abiertos de primero y cerrados al final.
+  3. Se aseguraron URLs de respaldo (*fallback*) tanto para el banner como para el logo en `RestaurantCard.tsx`.
 * **Estado**: ✅ **Completado** (2026-11-08).
 
 ---

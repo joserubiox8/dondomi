@@ -25,6 +25,9 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
     restaurant.estimatedTimeMax
   );
 
+  const bannerSrc = restaurant.bannerUrl || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80';
+  const logoSrc = restaurant.logoUrl || 'https://images.unsplash.com/photo-1598103442097-8b74394b95c6?auto=format&fit=crop&w=200&q=80';
+
   return (
     <Link
       href={`/restaurant/${restaurant.id}`}
@@ -33,7 +36,7 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
       {/* Banner Image Container */}
       <div className="relative h-44 w-full bg-slate-100 overflow-hidden">
         <Image
-          src={restaurant.bannerUrl}
+          src={bannerSrc}
           alt={restaurant.name}
           fill
           sizes="(max-width: 768px) 100vw, 400px"
@@ -76,7 +79,7 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
             </div>
             <div className="w-10 h-10 rounded-2xl bg-white p-0.5 shadow-md flex-shrink-0 relative overflow-hidden border border-white">
               <Image
-                src={restaurant.logoUrl}
+                src={logoSrc}
                 alt={`${restaurant.name} logo`}
                 fill
                 sizes="40px"

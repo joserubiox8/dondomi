@@ -1,17 +1,13 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useMemo } from 'react';
 import { FOOD_CATEGORIES } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import RestaurantCard from './RestaurantCard';
-import { Store, UtensilsCrossed, ChevronDown } from 'lucide-react';
-
-const PAGE_SIZE = 12;
+import { Store, UtensilsCrossed } from 'lucide-react';
 
 export default function RestaurantList() {
   const { searchQuery, selectedCategorySlug, restaurants, categories } = useApp();
-  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // Encontrar el nombre de la categoría seleccionada (si aplica)
   const activeCategory = useMemo(() => {
@@ -71,33 +67,6 @@ export default function RestaurantList() {
     });
   }, [searchQuery, selectedCategorySlug, restaurants, activeCategory]);
 
-  // Resetear el lote visible cuando el usuario busca o filtra
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [searchQuery, selectedCategorySlug]);
-
-  // Carga progresiva automática al aproximarse al final del scroll (Intersection Observer)
-  useEffect(() => {
-    const target = loadMoreRef.current;
-    if (!target) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, sortedAndFilteredRestaurants.length));
-        }
-      },
-      { rootMargin: '300px' }
-    );
-
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [sortedAndFilteredRestaurants.length]);
-
-  const displayedRestaurants = sortedAndFilteredRestaurants.slice(0, visibleCount);
-  const hasMore = visibleCount < sortedAndFilteredRestaurants.length;
-  const remainingCount = sortedAndFilteredRestaurants.length - visibleCount;
-
   return (
     <div className="space-y-6">
       {/* Sección principal: Lista completa con ordenamiento por conveniencia */}
@@ -130,27 +99,11 @@ export default function RestaurantList() {
             </div>
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {displayedRestaurants.map((restaurant) => (
-                <RestaurantCard key={restaurant.id} restaurant={restaurant} />
-              ))}
-            </div>
-
-            {/* Detector de scroll y botón de expansión progresiva */}
-            {hasMore && (
-              <div ref={loadMoreRef} className="pt-4 text-center">
-                <button
-                  type="button"
-                  onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-bold shadow-xs hover:bg-slate-50 transition cursor-pointer"
-                >
-                  <span>Cargar más restaurantes ({remainingCount} restantes)</span>
-                  <ChevronDown className="w-4 h-4 text-slate-500" />
-                </button>
-              </div>
-            )}
-          </>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {sortedAndFilteredRestaurants.map((restaurant) => (
+              <RestaurantCard key={restaurant.id} restaurant={restaurant} />
+            ))}
+          </div>
         )}
       </section>
     </div>
