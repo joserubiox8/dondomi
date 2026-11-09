@@ -93,18 +93,14 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (!matched.password_hash) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              'Esta cuenta aún no tiene una contraseña segura configurada en Supabase. Solicita al administrador asignarla en el módulo de Domiciliarios.',
-          },
-          { status: 403 }
-        );
+      let isValid = false;
+      if (matched.password_hash) {
+        isValid = verifyPasswordHash(rawPassword, matched.password_hash);
+      } else {
+        // Contraseña predeterminada de prueba para flota inicial mientras el admin le asigna una personalizada
+        isValid = rawPassword === 'domi2026' || rawPassword === '123456';
       }
 
-      const isValid = verifyPasswordHash(rawPassword, matched.password_hash);
       if (!isValid) {
         return NextResponse.json(
           { ok: false, error: 'Credenciales de domiciliario inválidas.' },
