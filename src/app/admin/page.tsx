@@ -27,14 +27,17 @@ import {
   Printer,
   UtensilsCrossed,
   Star,
+  BarChart3,
+  TrendingUp,
+  ChevronLeft,
+  ChevronRight,
+  Ban,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { formatCOP } from '@/lib/utils';
 import { validateDriverPasswordPolicy } from '@/lib/passwordPolicy';
 import {
   filterOrdersByPeriod,
-  calculateRestaurantSettlement,
-  calculateDriverSettlement,
   SettlementPeriod,
 } from '@/lib/pricing';
 import { getCustomerLoyaltyTier } from '@/services/dataService';
@@ -75,6 +78,7 @@ export default function AdminPage() {
     updateDriver,
     toggleDriverStatus,
     toggleDriverAvailability,
+    deleteDriver,
     updateOrderStatus,
     assignDriverByAdmin,
     unclaimOrder,
@@ -522,11 +526,56 @@ export default function AdminPage() {
   };
 
   // ==============================================================
-  // MODAL: GESTIÓN DE DOMICILIARIOS (CREAR / EDITAR)
+  // PARÁMETROS GLOBALES (TARIFA PLANA Y COMUNICADO EN VIVO)
+  // ==============================================================
+  const [deliveryFeeInput, setDeliveryFeeInput] = useState<string>(String(globalDeliveryFee));
+  const [announcementInput, setAnnouncementInput] = useState<string>(globalAnnouncement || '');
+
+  useEffect(() => {
+    setDeliveryFeeInput(String(globalDeliveryFee));
+  }, [globalDeliveryFee]);
+
+  useEffect(() => {
+    setAnnouncementInput(globalAnnouncement || '');
+  }, [globalAnnouncement]);
+
+  const handleSaveDeliveryFee = async (customFee?: number) => {
+    const raw = customFee !== undefined ? customFee : Number(String(deliveryFeeInput).replace(/\D/g, ''));
+    if (isNaN(raw) || raw < 0) {
+      showNotice('❌ Ingresa un valor numérico válido para la tarifa de domicilio');
+      return;
+    }
+    setDeliveryFeeInput(String(raw));
+    const res = await setGlobalDeliveryFee(raw);
+    if (!res.ok) {
+      showNotice(`❌ Error al guardar tarifa: ${res.error || 'Fallo de persistencia'}`);
+      return;
+    }
+    showNotice(`✅ Tarifa plana de domicilio actualizada a ${formatCOP(raw)}`);
+  };
+
+  const handleSaveAnnouncement = async (clear = false) => {
+    const nextValue = clear ? null : announcementInput.trim() || null;
+    setAnnouncementInput(nextValue || '');
+    const res = await setGlobalAnnouncement(nextValue);
+    if (!res.ok) {
+      showNotice(`❌ Error al actualizar comunicado: ${res.error || 'Fallo de persistencia'}`);
+      return;
+    }
+    if (nextValue) {
+      showNotice('📢 Comunicado global publicado en la App');
+    } else {
+      showNotice('✅ Aviso global retirado de la App');
+    }
+  };
+
+  // ==============================================================
+  // MODAL: GESTIÓN DE DOMICILIARIOS (CREAR / EDITAR / INHABILITAR / ELIMINAR)
   // ==============================================================
   const [driverSearch, setDriverSearch] = useState('');
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
+  const [driverToDelete, setDriverToDelete] = useState<Driver | null>(null);
   const [drvName, setDrvName] = useState('');
   const [drvPhone, setDrvPhone] = useState('');
   const [drvPlate, setDrvPlate] = useState('');
@@ -625,6 +674,31 @@ export default function AdminPage() {
     setIsDriverModalOpen(false);
   };
 
+  const handleToggleDriverStatus = async (drv: Driver) => {
+    const res = await toggleDriverStatus(drv.id);
+    if (!res.ok) {
+      showNotice(`❌ Error: ${res.error || 'No se pudo cambiar el estado del domiciliario'}`);
+      return;
+    }
+    showNotice(
+      drv.isActive
+        ? `🚫 Domiciliario "${drv.name}" inhabilitado`
+        : `✅ Domiciliario "${drv.name}" habilitado nuevamente`
+    );
+  };
+
+  const handleConfirmDeleteDriver = async () => {
+    if (!driverToDelete) return;
+    const target = driverToDelete;
+    const res = await deleteDriver(target.id);
+    if (!res.ok) {
+      showNotice(`❌ Error al eliminar domiciliario: ${res.error || 'Fallo de persistencia'}`);
+    } else {
+      showNotice(`🗑️ Domiciliario "${target.name}" eliminado de la flota`);
+    }
+    setDriverToDelete(null);
+  };
+
   const filteredDrivers = useMemo(() => {
     const q = driverSearch.trim().toLowerCase();
     return drivers.filter(
@@ -676,9 +750,17 @@ export default function AdminPage() {
   }, [orders, orderStatusFilter, orderRestFilter, orderSearch]);
 
   // ==============================================================
-  // DIRECTORIO CONSOLIDADO DE CLIENTES
+  // DIRECTORIO CONSOLIDADO DE CLIENTES (CON PAGINACIÓN CONTROLADA)
   // ==============================================================
   const [customerSearch, setCustomerSearch] = useState('');
+  const [customerTierFilter, setCustomerTierFilter] = useState<string>('TODOS');
+  const [customerPage, setCustomerPage] = useState<number>(1);
+  const CUSTOMERS_PER_PAGE = 20;
+
+  useEffect(() => {
+    setCustomerPage(1);
+  }, [customerSearch, customerTierFilter]);
+
   const customersDirectory = useMemo(() => {
     const map = new Map<
       string,
@@ -733,22 +815,46 @@ export default function AdminPage() {
 
     const list = Array.from(map.values()).sort((a, b) => b.totalSpent - a.totalSpent);
     const q = customerSearch.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (c) =>
+    return list.filter((c) => {
+      const matchesQuery =
+        !q ||
         c.name.toLowerCase().includes(q) ||
         c.phone.includes(q) ||
-        c.neighborhood.toLowerCase().includes(q)
-    );
-  }, [orders, customerSearch]);
+        c.neighborhood.toLowerCase().includes(q);
+      if (!matchesQuery) return false;
+      if (customerTierFilter === 'TODOS') return true;
+      const tier =
+        c.deliveredCount >= 20
+          ? 'VIP'
+          : c.deliveredCount >= 10
+          ? 'Oro'
+          : c.deliveredCount >= 4
+          ? 'Plata'
+          : c.deliveredCount >= 1
+          ? 'Bronce'
+          : 'Nuevo';
+      return tier === customerTierFilter;
+    });
+  }, [orders, customerSearch, customerTierFilter]);
+
+  const totalCustomerPages = Math.max(1, Math.ceil(customersDirectory.length / CUSTOMERS_PER_PAGE));
+  const safeCustomerPage = Math.min(customerPage, totalCustomerPages);
+  const paginatedCustomers = useMemo(() => {
+    const startIdx = (safeCustomerPage - 1) * CUSTOMERS_PER_PAGE;
+    return customersDirectory.slice(startIdx, startIdx + CUSTOMERS_PER_PAGE);
+  }, [customersDirectory, safeCustomerPage]);
 
   // ==============================================================
-  // MÉTRICAS EJECUTIVAS Y ALERTAS OPERATIVAS EN TIEMPO REAL
+  // MÉTRICAS EJECUTIVAS Y ESTADÍSTICAS DE RESTAURANTES
   // ==============================================================
+  const [statsRestFilter, setStatsRestFilter] = useState<string>('TODOS');
   const periodOrders = useMemo(() => filterOrdersByPeriod(orders, period), [orders, period]);
   const deliveredInPeriod = periodOrders.filter((o) => o.status === 'DELIVERED');
   const totalGMV = deliveredInPeriod.reduce((acc, o) => acc + o.total, 0);
+  const totalFoodSubtotal = deliveredInPeriod.reduce((acc, o) => acc + o.subtotal, 0);
   const totalDeliveryFees = deliveredInPeriod.reduce((acc, o) => acc + o.deliveryFee, 0);
+  const avgTicketInPeriod =
+    deliveredInPeriod.length > 0 ? Math.round(totalGMV / deliveredInPeriod.length) : 0;
   const activeOrders = orders.filter(
     (o) => o.status !== 'DELIVERED' && o.status !== 'CANCELLED'
   );
@@ -764,65 +870,209 @@ export default function AdminPage() {
   );
   const incidentOrders = activeOrders.filter((o) => Boolean(o.incidentReason));
 
-  // Liquidaciones por restaurante y por domiciliario en el periodo
-  const restaurantSettlements = useMemo(() => {
-    return restaurants.map((r) => {
-      const rOrders = periodOrders.filter(
-        (o) => o.restaurantId === r.id || o.restaurantName === r.name
-      );
-      const summary = calculateRestaurantSettlement(rOrders, r.commissionRate || 0);
-      return { restaurant: r, summary };
+  // Estadísticas detalladas por restaurante (0% comisiones)
+  const restaurantStats = useMemo(() => {
+    return restaurants
+      .filter((r) => statsRestFilter === 'TODOS' || r.id === statsRestFilter)
+      .map((r) => {
+        const rOrders = periodOrders.filter(
+          (o) => o.restaurantId === r.id || o.restaurantName === r.name
+        );
+        const delivered = rOrders.filter((o) => o.status === 'DELIVERED');
+        const cancelled = rOrders.filter((o) => o.status === 'CANCELLED');
+        const active = rOrders.filter(
+          (o) => o.status !== 'DELIVERED' && o.status !== 'CANCELLED'
+        );
+
+        const totalSales = delivered.reduce((acc, o) => acc + o.total, 0);
+        const foodSales = delivered.reduce((acc, o) => acc + o.subtotal, 0);
+        const deliverySales = delivered.reduce((acc, o) => acc + o.deliveryFee, 0);
+        const avgTicket = delivered.length > 0 ? Math.round(totalSales / delivered.length) : 0;
+
+        const appDeliveryOrders = delivered.filter(
+          (o) => !o.orderChannel || o.orderChannel === 'delivery_app'
+        );
+        const posLocalOrders = delivered.filter((o) => o.orderChannel === 'pos_local');
+        const posTakeoutOrders = delivered.filter((o) => o.orderChannel === 'pos_takeout');
+
+        let cashSales = 0;
+        let digitalSales = 0;
+        delivered.forEach((o) => {
+          if (o.isSplitPayment) {
+            cashSales += Number(o.cashAmount) || 0;
+            digitalSales += Number(o.transferAmount) || 0;
+          } else if (o.paymentMethod === 'EFECTIVO') {
+            cashSales += o.total;
+          } else {
+            digitalSales += o.total;
+          }
+        });
+
+        // Plato más vendido del restaurante en el periodo
+        const dishCounts = new Map<string, { name: string; qty: number; revenue: number }>();
+        delivered.forEach((o) => {
+          (o.items || []).forEach((it) => {
+            const prev = dishCounts.get(it.productName) || {
+              name: it.productName,
+              qty: 0,
+              revenue: 0,
+            };
+            prev.qty += it.quantity || 1;
+            prev.revenue += it.subtotal || 0;
+            dishCounts.set(it.productName, prev);
+          });
+        });
+        const topDish =
+          Array.from(dishCounts.values()).sort((a, b) => b.qty - a.qty)[0] || null;
+
+        const ratedOrders = delivered.filter((o) => typeof o.rating === 'number' && o.rating > 0);
+        const avgRating =
+          ratedOrders.length > 0
+            ? (
+                ratedOrders.reduce((acc, o) => acc + (o.rating || 5), 0) / ratedOrders.length
+              ).toFixed(1)
+            : Number(r.rating || 5.0).toFixed(1);
+
+        const conversionRate =
+          rOrders.length > 0 ? Math.round((delivered.length / rOrders.length) * 100) : 100;
+
+        return {
+          restaurant: r,
+          totalOrders: rOrders.length,
+          deliveredCount: delivered.length,
+          cancelledCount: cancelled.length,
+          activeCount: active.length,
+          conversionRate,
+          totalSales,
+          foodSales,
+          deliverySales,
+          avgTicket,
+          appDeliveryCount: appDeliveryOrders.length,
+          posLocalCount: posLocalOrders.length,
+          posTakeoutCount: posTakeoutOrders.length,
+          cashSales,
+          digitalSales,
+          topDish,
+          avgRating,
+        };
+      })
+      .sort((a, b) => b.totalSales - a.totalSales);
+  }, [restaurants, periodOrders, statsRestFilter]);
+
+  // Resumen consolidado por canal y método de pago para la vista de Estadísticas
+  const analyticsTotals = useMemo(() => {
+    const filteredPeriodOrders =
+      statsRestFilter === 'TODOS'
+        ? periodOrders
+        : periodOrders.filter((o) => {
+            const r = restaurants.find((rest) => rest.id === statsRestFilter);
+            return o.restaurantId === statsRestFilter || (r && o.restaurantName === r.name);
+          });
+    const delivered = filteredPeriodOrders.filter((o) => o.status === 'DELIVERED');
+    const cancelled = filteredPeriodOrders.filter((o) => o.status === 'CANCELLED');
+
+    const appCount = delivered.filter(
+      (o) => !o.orderChannel || o.orderChannel === 'delivery_app'
+    ).length;
+    const mesaCount = delivered.filter((o) => o.orderChannel === 'pos_local').length;
+    const llevarCount = delivered.filter((o) => o.orderChannel === 'pos_takeout').length;
+
+    let cashTotal = 0;
+    let digitalTotal = 0;
+    delivered.forEach((o) => {
+      if (o.isSplitPayment) {
+        cashTotal += Number(o.cashAmount) || 0;
+        digitalTotal += Number(o.transferAmount) || 0;
+      } else if (o.paymentMethod === 'EFECTIVO') {
+        cashTotal += o.total;
+      } else {
+        digitalTotal += o.total;
+      }
     });
-  }, [restaurants, periodOrders]);
 
-  const driverSettlements = useMemo(() => {
-    return drivers.map((d) => {
-      const dOrders = periodOrders.filter(
-        (o) => o.driverId === d.id || o.driverName === d.name
-      );
-      const summary = calculateDriverSettlement(dOrders, globalDeliveryFee);
-      return { driver: d, summary };
+    // Ranking top 8 platos más vendidos
+    const dishMap = new Map<
+      string,
+      { name: string; restaurantName: string; qty: number; revenue: number }
+    >();
+    delivered.forEach((o) => {
+      (o.items || []).forEach((it) => {
+        const key = `${o.restaurantName}::${it.productName}`;
+        const prev = dishMap.get(key) || {
+          name: it.productName,
+          restaurantName: o.restaurantName,
+          qty: 0,
+          revenue: 0,
+        };
+        prev.qty += it.quantity || 1;
+        prev.revenue += it.subtotal || 0;
+        dishMap.set(key, prev);
+      });
     });
-  }, [drivers, periodOrders, globalDeliveryFee]);
+    const topDishes = Array.from(dishMap.values())
+      .sort((a, b) => b.qty - a.qty || b.revenue - a.revenue)
+      .slice(0, 8);
 
-  const totalPlatformCommission = restaurantSettlements.reduce(
-    (acc, item) => acc + item.summary.platformCommissionAmount,
-    0
-  );
+    const gmv = delivered.reduce((acc, o) => acc + o.total, 0);
+    const foodGmv = delivered.reduce((acc, o) => acc + o.subtotal, 0);
+    const avgTicket = delivered.length > 0 ? Math.round(gmv / delivered.length) : 0;
+    const effectiveness =
+      filteredPeriodOrders.length > 0
+        ? Math.round((delivered.length / filteredPeriodOrders.length) * 100)
+        : 100;
 
-  // Exportar CSV de liquidaciones y pedidos
+    return {
+      totalOrders: filteredPeriodOrders.length,
+      deliveredCount: delivered.length,
+      cancelledCount: cancelled.length,
+      gmv,
+      foodGmv,
+      avgTicket,
+      effectiveness,
+      appCount,
+      mesaCount,
+      llevarCount,
+      cashTotal,
+      digitalTotal,
+      topDishes,
+    };
+  }, [periodOrders, statsRestFilter, restaurants]);
+
+  // Exportar CSV de estadísticas de restaurantes
   const handleExportCSV = () => {
     const headers = [
-      'NumeroPedido',
-      'Fecha',
       'Restaurante',
-      'Cliente',
-      'Telefono',
       'Barrio',
-      'MetodoPago',
-      'EstadoPago',
-      'Flota',
-      'Domiciliario',
-      'SubtotalComida',
-      'TarifaDomicilio',
-      'Total',
-      'Estado',
+      'PedidosTotales',
+      'Entregados',
+      'Cancelados',
+      'EfectividadPorcentaje',
+      'DomiciliosApp',
+      'VentasMesaPOS',
+      'ParaLlevarPOS',
+      'VentasComidaCOP',
+      'VentasTotalesGMVCOP',
+      'TicketPromedioCOP',
+      'RecaudoEfectivoCOP',
+      'RecaudoDigitalCOP',
+      'PlatoMasVendido',
     ];
-    const rows = periodOrders.map((o) => [
-      o.orderNumber,
-      new Date(o.createdAt).toLocaleString('es-CO'),
-      `"${o.restaurantName.replace(/"/g, '""')}"`,
-      `"${o.customerName.replace(/"/g, '""')}"`,
-      o.customerPhone,
-      `"${o.deliveryAddress.neighborhood.replace(/"/g, '""')}"`,
-      o.paymentMethod,
-      o.paymentStatus,
-      o.deliveryFleet || (o.driverId ? 'DONDOMI' : 'SIN_ASIGNAR'),
-      `"${(o.driverName || '').replace(/"/g, '""')}"`,
-      o.subtotal,
-      o.deliveryFee,
-      o.total,
-      o.status,
+    const rows = restaurantStats.map((item) => [
+      `"${item.restaurant.name.replace(/"/g, '""')}"`,
+      `"${item.restaurant.neighborhood.replace(/"/g, '""')}"`,
+      item.totalOrders,
+      item.deliveredCount,
+      item.cancelledCount,
+      `${item.conversionRate}%`,
+      item.appDeliveryCount,
+      item.posLocalCount,
+      item.posTakeoutCount,
+      item.foodSales,
+      item.totalSales,
+      item.avgTicket,
+      item.cashSales,
+      item.digitalSales,
+      `"${(item.topDish ? `${item.topDish.name} (${item.topDish.qty})` : 'Sin ventas').replace(/"/g, '""')}"`,
     ]);
 
     const csvContent =
@@ -834,12 +1084,12 @@ export default function AdminPage() {
     link.setAttribute('href', encodedUri);
     link.setAttribute(
       'download',
-      `dondomi_reporte_${period.toLowerCase()}_${new Date().toISOString().slice(0, 10)}.csv`
+      `dondomi_estadisticas_restaurantes_${period.toLowerCase()}_${new Date().toISOString().slice(0, 10)}.csv`
     );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showNotice('📥 Reporte CSV descargado correctamente');
+    showNotice('📥 Reporte CSV de Estadísticas descargado correctamente');
   };
 
   return (
@@ -1060,12 +1310,14 @@ export default function AdminPage() {
 
               <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Comisiones DonDomi
+                  Ticket Promedio
                 </span>
                 <span className="text-lg font-black text-orange-600 mt-1 block">
-                  {formatCOP(totalPlatformCommission)}
+                  {formatCOP(avgTicketInPeriod)}
                 </span>
-                <span className="text-[10px] text-slate-400 block">Sobre comida entregada</span>
+                <span className="text-[10px] text-slate-400 block">
+                  Comida: {formatCOP(totalFoodSubtotal)}
+                </span>
               </div>
 
               <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-2xs">
@@ -1135,8 +1387,8 @@ export default function AdminPage() {
                   : 'text-slate-600 hover:bg-slate-50'
               }`}
             >
-              <Wallet className="w-4 h-4" />
-              <span>Liquidaciones</span>
+              <BarChart3 className="w-4 h-4" />
+              <span>Estadísticas</span>
             </button>
 
             <button
@@ -1187,7 +1439,7 @@ export default function AdminPage() {
                     Gestión Completa de Restaurantes Afiliados
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Crea, edita tarifas/comisiones, inspecciona menús, pausa cocinas o suspende/archiva comercios.
+                    Crea, edita información, inspecciona menús, pausa cocinas o suspende/archiva comercios.
                   </p>
                 </div>
 
@@ -1285,7 +1537,18 @@ export default function AdminPage() {
                             </div>
 
                             <button
-                              onClick={() => toggleRestaurantStatus(rest.id)}
+                              onClick={async () => {
+                                const res = await toggleRestaurantStatus(rest.id);
+                                if (!res.ok) {
+                                  showNotice(`❌ ${res.error || 'No se pudo cambiar el estado'}`);
+                                } else {
+                                  showNotice(
+                                    rest.isOpen
+                                      ? `⏸️ Cocina de "${rest.name}" pausada`
+                                      : `🟢 Cocina de "${rest.name}" abierta`
+                                  );
+                                }
+                              }}
                               className={`px-3 py-1 rounded-full text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                                 rest.isOpen
                                   ? 'bg-emerald-100 text-emerald-800'
@@ -1307,14 +1570,14 @@ export default function AdminPage() {
                               <strong>WhatsApp:</strong> {rest.phone}
                             </p>
                             <p>
-                              <strong>Comisión:</strong> {rest.commissionRate}%
+                              <strong>Horario:</strong> {rest.openingHours || '11:00 AM - 10:00 PM'}
                             </p>
                             <p>
                               <strong>Pedido mín.:</strong> {formatCOP(rest.minOrderAmount || 0)}
                             </p>
                             <p>
-                              <strong>Carta / Pedidos:</strong> {restProducts.length} platos ·{' '}
-                              {restOrdersCount} órdenes
+                              <strong>Pedidos totales:</strong> {restOrdersCount} órdenes
+                              {restProducts.length > 0 ? ` · ${restProducts.length} platos` : ''}
                             </p>
                             <p className="col-span-2 truncate">
                               <strong>Acceso:</strong> {rest.email || `${rest.slug}@dondomi.com`} (PIN:{' '}
@@ -1363,7 +1626,7 @@ export default function AdminPage() {
                             {accStatus !== 'ACTIVE' && (
                               <button
                                 onClick={() => handleQuickRestAccountStatus(rest, 'ACTIVE')}
-                                className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-[11px] hover:bg-emerald-100 cursor-pointer"
+                                className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-[11px] hover:bg-emerald-100 cursor-pointer"
                               >
                                 Reactivar
                               </button>
@@ -1371,7 +1634,7 @@ export default function AdminPage() {
                             {accStatus === 'ACTIVE' && (
                               <button
                                 onClick={() => handleQuickRestAccountStatus(rest, 'SUSPENDED')}
-                                className="px-2 py-1 rounded-lg bg-amber-50 text-amber-800 font-bold text-[11px] hover:bg-amber-100 cursor-pointer"
+                                className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 font-bold text-[11px] hover:bg-amber-100 cursor-pointer"
                                 title="Ocultar temporalmente del catálogo público"
                               >
                                 Suspender
@@ -1380,7 +1643,7 @@ export default function AdminPage() {
                             {accStatus !== 'ARCHIVED' && (
                               <button
                                 onClick={() => handleQuickRestAccountStatus(rest, 'ARCHIVED')}
-                                className="px-2 py-1 rounded-lg bg-slate-100 text-slate-600 font-bold text-[11px] hover:bg-slate-200 cursor-pointer"
+                                className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 font-bold text-[11px] hover:bg-slate-200 cursor-pointer"
                                 title="Archivar comercio"
                               >
                                 Archivar
@@ -1565,77 +1828,207 @@ export default function AdminPage() {
           )}
 
           {/* ============================================================== */}
-          {/* TAB 3: LIQUIDACIONES, COMISIONES Y CORTES FINANCIEROS */}
+          {/* TAB 3: CENTRO DE ESTADÍSTICAS Y RENDIMIENTO DE RESTAURANTES */}
           {/* ============================================================== */}
           {activeTab === 'FINANZAS' && (
             <div className="space-y-4">
               <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="font-extrabold text-base text-slate-900">
-                    Centro de Liquidaciones y Cortes Financieros
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Conciliación exacta por Restaurante y por Domiciliario según el flujo de efectivo y transferencias.
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-orange-600" />
+                    <h3 className="font-extrabold text-base text-slate-900">
+                      Centro de Estadísticas de Restaurantes
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Analítica comercial en tiempo real por restaurante: volumen de órdenes, canales (App vs. Caja POS), métodos de pago y platos estrella (0% comisiones).
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 print:hidden">
+                <div className="flex flex-wrap items-center gap-2 print:hidden">
+                  <select
+                    value={statsRestFilter}
+                    onChange={(e) => setStatsRestFilter(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="TODOS">Todos los restaurantes ({restaurants.length})</option>
+                    {restaurants.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+
                   <button
                     onClick={handleExportCSV}
                     className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Exportar CSV</span>
+                    <span>Exportar Estadísticas CSV</span>
                   </button>
                   <button
                     onClick={() => window.print()}
                     className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
                   >
                     <Printer className="w-3.5 h-3.5" />
-                    <span>Imprimir Corte</span>
+                    <span>Imprimir Reporte</span>
                   </button>
                 </div>
               </div>
 
-              {/* Tabla 1: Liquidación por Restaurante */}
+              {/* 4 Tarjetas de Resumen Analítico del Periodo */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                    Ventas Entregadas (GMV)
+                  </span>
+                  <span className="text-xl font-black text-emerald-600 mt-1 block">
+                    {formatCOP(analyticsTotals.gmv)}
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Comida neta: <strong>{formatCOP(analyticsTotals.foodGmv)}</strong> · Ticket prom:{' '}
+                    <strong>{formatCOP(analyticsTotals.avgTicket)}</strong>
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                    Distribución por Canal
+                  </span>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-xl font-black text-slate-900">
+                      {analyticsTotals.deliveredCount}
+                    </span>
+                    <span className="text-xs text-slate-500 font-bold">órdenes completadas</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-1">
+                    🛵 App: <strong>{analyticsTotals.appCount}</strong> · 🍽️ Mesa:{' '}
+                    <strong>{analyticsTotals.mesaCount}</strong> · 🛍️ Llevar:{' '}
+                    <strong>{analyticsTotals.llevarCount}</strong>
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                    Efectividad Operativa
+                  </span>
+                  <span className="text-xl font-black text-blue-600 mt-1 block">
+                    {analyticsTotals.effectiveness}%
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    <strong>{analyticsTotals.deliveredCount}</strong> entregados de{' '}
+                    <strong>{analyticsTotals.totalOrders}</strong> ({analyticsTotals.cancelledCount}{' '}
+                    cancelados)
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                    Flujo por Método de Pago
+                  </span>
+                  <span className="text-sm font-black text-amber-700 mt-1.5 block">
+                    💵 Efectivo: {formatCOP(analyticsTotals.cashTotal)}
+                  </span>
+                  <span className="text-sm font-black text-indigo-600 mt-0.5 block">
+                    📲 Digital (Nequi/Bre-B/Davi): {formatCOP(analyticsTotals.digitalTotal)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Tabla 1: Rendimiento Detallado por Restaurante */}
               <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3 overflow-x-auto">
-                <h4 className="font-extrabold text-sm text-slate-900">
-                  1. Corte de Liquidación por Restaurante ({restaurantSettlements.length})
-                </h4>
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                    <TrendingUp className="w-4 h-4 text-orange-600" />
+                    <span>1. Rendimiento Comparativo por Restaurante ({restaurantStats.length})</span>
+                  </h4>
+                  <span className="text-[11px] text-slate-400 font-semibold">
+                    Ordenado por mayor volumen de ventas entregadas
+                  </span>
+                </div>
 
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-slate-200 text-[10px] font-black uppercase text-slate-400">
-                      <th className="py-2 pr-3">Restaurante</th>
-                      <th className="py-2 px-2">Entregados</th>
-                      <th className="py-2 px-2">Subtotal Comida</th>
-                      <th className="py-2 px-2">Comida Efectivo</th>
-                      <th className="py-2 px-2">Comida Digital</th>
-                      <th className="py-2 px-2">Flota DonDomi / Propia</th>
-                      <th className="py-2 px-2">Domis Digitales (a Repartidor)</th>
-                      <th className="py-2 px-2">Comisión DonDomi</th>
-                      <th className="py-2 pl-2 text-right">Saldo a Cobrar al Local</th>
+                      <th className="py-2.5 pr-3">Restaurante</th>
+                      <th className="py-2.5 px-2">Pedidos (Entr. / Canc.)</th>
+                      <th className="py-2.5 px-2">Canales (App / Mesa / Llevar)</th>
+                      <th className="py-2.5 px-2">Ventas Comida</th>
+                      <th className="py-2.5 px-2">Ventas Totales (GMV)</th>
+                      <th className="py-2.5 px-2">Ticket Promedio</th>
+                      <th className="py-2.5 px-2">Efectivo vs Digital</th>
+                      <th className="py-2.5 pl-2">Plato Más Vendido</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {restaurantSettlements.map(({ restaurant: r, summary: s }) => (
-                      <tr key={r.id} className="hover:bg-slate-50">
-                        <td className="py-2.5 pr-3 font-bold text-slate-900">{r.name}</td>
-                        <td className="py-2.5 px-2">{s.deliveredOrdersCount}</td>
-                        <td className="py-2.5 px-2 font-bold">{formatCOP(s.foodSubtotalTotal)}</td>
-                        <td className="py-2.5 px-2 text-amber-700">{formatCOP(s.cashFoodSubtotal)}</td>
-                        <td className="py-2.5 px-2 text-blue-700">{formatCOP(s.digitalFoodSubtotal)}</td>
-                        <td className="py-2.5 px-2">
-                          {s.dondomiFleetCount} DD / {s.ownFleetCount} Prop.
+                    {restaurantStats.map((item, idx) => (
+                      <tr key={item.restaurant.id} className="hover:bg-slate-50">
+                        <td className="py-3 pr-3">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 font-black text-[10px] flex items-center justify-center">
+                              {idx + 1}
+                            </span>
+                            <div>
+                              <span className="font-black text-slate-900 block">
+                                {item.restaurant.name}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {item.restaurant.neighborhood} · ★ {item.avgRating}
+                              </span>
+                            </div>
+                          </div>
                         </td>
-                        <td className="py-2.5 px-2 font-semibold text-amber-800">
-                          {formatCOP(s.deliveryFeesOwedToDrivers)}
+                        <td className="py-3 px-2">
+                          <span className="font-black text-emerald-700">
+                            {item.deliveredCount} entregados
+                          </span>
+                          <span className="block text-[10px] text-slate-400">
+                            {item.cancelledCount} canc. · {item.conversionRate}% éxito
+                          </span>
                         </td>
-                        <td className="py-2.5 px-2 font-semibold text-orange-600">
-                          {formatCOP(s.platformCommissionAmount)} ({s.commissionRate}%)
+                        <td className="py-3 px-2">
+                          <div className="flex flex-wrap gap-1 text-[10px] font-bold">
+                            <span className="bg-orange-50 text-orange-700 px-2 py-0.5 rounded-md">
+                              🛵 App: {item.appDeliveryCount}
+                            </span>
+                            <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">
+                              🍽️ Mesa: {item.posLocalCount}
+                            </span>
+                            <span className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">
+                              🛍️ Llevar: {item.posTakeoutCount}
+                            </span>
+                          </div>
                         </td>
-                        <td className="py-2.5 pl-2 text-right font-black text-slate-900">
-                          {formatCOP(s.totalOwedByRestaurant)}
+                        <td className="py-3 px-2 font-bold text-slate-800">
+                          {formatCOP(item.foodSales)}
+                        </td>
+                        <td className="py-3 px-2 font-black text-emerald-600">
+                          {formatCOP(item.totalSales)}
+                        </td>
+                        <td className="py-3 px-2 font-bold text-slate-700">
+                          {formatCOP(item.avgTicket)}
+                        </td>
+                        <td className="py-3 px-2 text-[11px]">
+                          <span className="text-amber-700 font-bold block">
+                            Efec: {formatCOP(item.cashSales)}
+                          </span>
+                          <span className="text-indigo-600 font-bold block">
+                            Dig: {formatCOP(item.digitalSales)}
+                          </span>
+                        </td>
+                        <td className="py-3 pl-2">
+                          {item.topDish ? (
+                            <div>
+                              <span className="font-bold text-slate-900 block">
+                                {item.topDish.name}
+                              </span>
+                              <span className="text-[10px] text-orange-600 font-bold">
+                                {item.topDish.qty} unds · {formatCOP(item.topDish.revenue)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">Sin ventas en periodo</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1643,44 +2036,44 @@ export default function AdminPage() {
                 </table>
               </div>
 
-              {/* Tabla 2: Liquidación por Domiciliario */}
-              <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3 overflow-x-auto">
+              {/* Tabla 2: Ranking de Platos Más Vendidos */}
+              <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3">
                 <h4 className="font-extrabold text-sm text-slate-900">
-                  2. Corte de Liquidación por Domiciliario DonDomi ({driverSettlements.length})
+                  2. Ranking de Platos Más Vendidos en el Periodo ({analyticsTotals.topDishes.length})
                 </h4>
 
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-[10px] font-black uppercase text-slate-400">
-                      <th className="py-2 pr-3">Domiciliario</th>
-                      <th className="py-2 px-2">Carreras Entregadas</th>
-                      <th className="py-2 px-2">Ganancia Total ($7k/u)</th>
-                      <th className="py-2 px-2">Efectivo Total Cobrado</th>
-                      <th className="py-2 px-2">Efectivo Comida (Entregar a Local)</th>
-                      <th className="py-2 pl-2 text-right">Domis Digitales (Por Recibir)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {driverSettlements.map(({ driver: d, summary: s }) => (
-                      <tr key={d.id} className="hover:bg-slate-50">
-                        <td className="py-2.5 pr-3 font-bold text-slate-900">
-                          {d.name} <span className="text-slate-400 font-normal">({d.plate})</span>
-                        </td>
-                        <td className="py-2.5 px-2 font-bold">{s.completedDeliveries}</td>
-                        <td className="py-2.5 px-2 font-black text-emerald-600">
-                          {formatCOP(s.driverDeliveryEarnings)}
-                        </td>
-                        <td className="py-2.5 px-2">{formatCOP(s.totalCashCollectedFromCustomers)}</td>
-                        <td className="py-2.5 px-2 font-semibold text-amber-700">
-                          {formatCOP(s.cashFoodToHandOverToRestaurants)}
-                        </td>
-                        <td className="py-2.5 pl-2 text-right font-black text-blue-600">
-                          {formatCOP(s.digitalDeliveryFeesOwedToDriver)}
-                        </td>
-                      </tr>
+                {analyticsTotals.topDishes.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-4 text-center">
+                    No se registran platos entregados en el periodo seleccionado.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+                    {analyticsTotals.topDishes.map((dish, i) => (
+                      <div
+                        key={`${dish.restaurantName}-${dish.name}-${i}`}
+                        className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between gap-1"
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+                            Top #{i + 1}
+                          </span>
+                          <span className="text-xs font-black text-emerald-600">
+                            {dish.qty} unds
+                          </span>
+                        </div>
+                        <p className="font-black text-xs text-slate-900 mt-1 line-clamp-1">
+                          {dish.name}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {dish.restaurantName}
+                        </p>
+                        <p className="text-xs font-bold text-slate-800 pt-1 border-t border-slate-200/70">
+                          Ingresos: {formatCOP(dish.revenue)}
+                        </p>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1696,7 +2089,7 @@ export default function AdminPage() {
                     Flota de Domiciliarios ({drivers.length})
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Administra repartidores, datos de vehículo, disponibilidad de turno y carreras en curso.
+                    Administra repartidores, datos de vehículo, disponibilidad de turno, inhabilitación y baja definitiva.
                   </p>
                 </div>
 
@@ -1722,124 +2115,182 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {filteredDrivers.map((drv) => {
-                  const currentOrder = activeOrders.find(
-                    (o) => o.driverId === drv.id || o.driverName === drv.name
-                  );
-                  const isAvailable = drv.isAvailable !== false;
+              {filteredDrivers.length === 0 ? (
+                <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center text-xs text-slate-400">
+                  No se encontraron domiciliarios registrados con ese criterio.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {filteredDrivers.map((drv) => {
+                    const currentOrder = activeOrders.find(
+                      (o) => o.driverId === drv.id || o.driverName === drv.name
+                    );
+                    const isAvailable = drv.isAvailable !== false;
 
-                  return (
-                    <div
-                      key={drv.id}
-                      className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col justify-between gap-3"
-                    >
-                      <div>
-                        <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center font-black">
-                              <Bike className="w-5 h-5" />
+                    return (
+                      <div
+                        key={drv.id}
+                        className={`bg-white rounded-3xl p-4 sm:p-5 border shadow-xs flex flex-col justify-between gap-3 ${
+                          drv.isActive
+                            ? 'border-slate-200'
+                            : 'border-red-200 bg-red-50/10 opacity-85'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                            <div className="flex items-center gap-2.5">
+                              <div
+                                className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${
+                                  drv.isActive
+                                    ? 'bg-blue-100 text-blue-600'
+                                    : 'bg-red-100 text-red-600'
+                                }`}
+                              >
+                                <Bike className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <h4 className="font-black text-sm text-slate-900">{drv.name}</h4>
+                                  {!drv.isActive && (
+                                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                      Inhabilitado
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-500">
+                                  {drv.phone} · {drv.vehicleType || 'MOTO'}: {drv.plate}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <h4 className="font-black text-sm text-slate-900">{drv.name}</h4>
-                              <p className="text-xs text-slate-500">
-                                {drv.phone} · {drv.vehicleType || 'MOTO'}: {drv.plate}
-                              </p>
+
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={async () => {
+                                  const res = await toggleDriverAvailability(drv.id);
+                                  if (res.ok) {
+                                    showNotice(
+                                      isAvailable
+                                        ? `⏸️ Turno de "${drv.name}" pausado`
+                                        : `🟢 "${drv.name}" puesto en turno`
+                                    );
+                                  }
+                                }}
+                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${
+                                  isAvailable
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-slate-200 text-slate-700'
+                                }`}
+                                title="Cambiar estado de turno"
+                              >
+                                {isAvailable ? '🟢 En Turno' : '⏸️ Pausado'}
+                              </button>
+
+                              <button
+                                onClick={() => handleToggleDriverStatus(drv)}
+                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${
+                                  drv.isActive
+                                    ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                    : 'bg-red-100 text-red-800 hover:bg-red-200'
+                                }`}
+                                title="Habilitar o inhabilitar cuenta del domiciliario"
+                              >
+                                {drv.isActive ? 'Habilitado' : 'Inhabilitado'}
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => toggleDriverAvailability(drv.id)}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${
-                                isAvailable
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : 'bg-slate-200 text-slate-700'
-                              }`}
-                              title="Cambiar estado de turno"
-                            >
-                              {isAvailable ? '🟢 En Turno' : '⏸️ Pausado'}
-                            </button>
-
-                            <button
-                              onClick={() => toggleDriverStatus(drv.id)}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${
-                                drv.isActive
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : 'bg-red-100 text-red-800'
-                              }`}
-                              title="Habilitar o suspender cuenta"
-                            >
-                              {drv.isActive ? 'Habilitado' : 'Suspendido'}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="pt-2 text-xs text-slate-600 space-y-1">
-                          <p>
-                            <strong>Correo acceso:</strong> {drv.email} ·{' '}
-                            <span className="text-emerald-700 font-medium">Contraseña cifrada (scrypt)</span>
-                          </p>
-                          <p>
-                            <strong>Carreras históricas:</strong> {drv.totalDeliveries} ·{' '}
-                            <strong>Calificación:</strong> ★ {drv.rating}
-                          </p>
-                          {currentOrder ? (
-                            <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 font-bold text-[11px] mt-1">
-                              🛵 En carrera activa: {currentOrder.orderNumber} ({currentOrder.restaurantName})
-                            </div>
-                          ) : (
-                            <p className="text-[11px] text-emerald-700 font-semibold">
-                              ✓ Libre para tomar pedido
+                          <div className="pt-2 text-xs text-slate-600 space-y-1">
+                            <p>
+                              <strong>Correo acceso:</strong> {drv.email} ·{' '}
+                              <span className="text-emerald-700 font-medium">Contraseña cifrada (scrypt)</span>
                             </p>
-                          )}
+                            <p>
+                              <strong>Carreras históricas:</strong> {drv.totalDeliveries} ·{' '}
+                              <strong>Calificación:</strong> ★ {drv.rating}
+                            </p>
+                            {currentOrder ? (
+                              <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 font-bold text-[11px] mt-1">
+                                🛵 En carrera activa: {currentOrder.orderNumber} ({currentOrder.restaurantName})
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-emerald-700 font-semibold">
+                                {drv.isActive
+                                  ? '✓ Libre para tomar pedido'
+                                  : '⛔ Cuenta inhabilitada para tomar pedidos'}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleOpenEditDriver(drv)}
-                            className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                            <span>Editar</span>
-                          </button>
-                          <a
-                            href={`https://wa.me/57${drv.phone.replace(/\D/g, '')}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-emerald-600 font-bold hover:underline"
-                          >
-                            WhatsApp
-                          </a>
+                        <div className="pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              onClick={() => handleOpenEditDriver(drv)}
+                              className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              <span>Editar</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleToggleDriverStatus(drv)}
+                              className={`px-2.5 py-1.5 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition ${
+                                drv.isActive
+                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-800'
+                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+                              }`}
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              <span>{drv.isActive ? 'Inhabilitar' : 'Habilitar'}</span>
+                            </button>
+
+                            <button
+                              onClick={() => setDriverToDelete(drv)}
+                              className="px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-bold flex items-center gap-1 cursor-pointer transition"
+                              title="Eliminar domiciliario de la flota"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Eliminar</span>
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2.5">
+                            <a
+                              href={`https://wa.me/57${drv.phone.replace(/\D/g, '')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-emerald-600 font-bold hover:underline"
+                            >
+                              WhatsApp
+                            </a>
+                            <a
+                              href={`tel:${drv.phone}`}
+                              className="text-blue-600 font-bold hover:underline"
+                            >
+                              Llamar
+                            </a>
+                          </div>
                         </div>
-                        <a
-                          href={`tel:${drv.phone}`}
-                          className="text-blue-600 font-bold hover:underline"
-                        >
-                          Llamar
-                        </a>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
           {/* ============================================================== */}
-          {/* TAB 5: DIRECTORIO DE CLIENTES */}
+          {/* TAB 5: DIRECTORIO DE CLIENTES (CON PAGINACIÓN SEGURA) */}
           {/* ============================================================== */}
           {activeTab === 'CLIENTES' && (
             <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="font-extrabold text-base text-slate-900">
                     Directorio Consolidado de Clientes ({customersDirectory.length})
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Clientes identificados por su número celular de 10 dígitos en Valledupar.
+                    Vista paginada de alto rendimiento ({CUSTOMERS_PER_PAGE} clientes por página) para evitar sobrecarga del navegador.
                   </p>
                 </div>
 
@@ -1855,63 +2306,125 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {customersDirectory.length === 0 ? (
+              {/* Filtro por Nivel de Fidelización + Resumen de Paginación */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-2xl border border-slate-200 text-xs">
+                <div className="flex items-center gap-1 overflow-x-auto">
+                  {(['TODOS', 'VIP', 'Oro', 'Plata', 'Bronce', 'Nuevo'] as const).map((tier) => (
+                    <button
+                      key={tier}
+                      onClick={() => setCustomerTierFilter(tier)}
+                      className={`px-2.5 py-1 rounded-xl font-bold text-[11px] whitespace-nowrap transition cursor-pointer ${
+                        customerTierFilter === tier
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {tier === 'TODOS' ? 'Todos los niveles' : tier}
+                    </button>
+                  ))}
+                </div>
+
+                <span className="text-[11px] font-bold text-slate-500">
+                  Mostrando{' '}
+                  {customersDirectory.length === 0
+                    ? 0
+                    : (safeCustomerPage - 1) * CUSTOMERS_PER_PAGE + 1}
+                  –
+                  {Math.min(safeCustomerPage * CUSTOMERS_PER_PAGE, customersDirectory.length)} de{' '}
+                  {customersDirectory.length} clientes
+                </span>
+              </div>
+
+              {paginatedCustomers.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-6">
-                  Aún no hay clientes registrados en el historial de pedidos.
+                  No se encontraron clientes con el criterio de búsqueda o filtro actual.
                 </p>
               ) : (
-                <div className="divide-y divide-slate-100 text-xs">
-                  {customersDirectory.map((c) => {
-                    const loyalty = getCustomerLoyaltyTier(c.phone, orders);
-                    return (
-                      <div
-                        key={c.phone}
-                        className="py-3 flex flex-wrap items-center justify-between gap-3"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-black text-slate-900 text-sm">{c.name}</span>
-                            <span className="text-slate-400">•</span>
-                            <span className="font-mono font-bold text-blue-600">{c.phone}</span>
-                            {loyalty && (
-                              <span
-                                className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${loyalty.badgeClass}`}
-                                title={`Cliente con ${loyalty.orderCount} pedidos entregados`}
-                              >
-                                <span>{loyalty.icon}</span>
-                                <span>{loyalty.tier}</span>
+                <>
+                  <div className="divide-y divide-slate-100 text-xs">
+                    {paginatedCustomers.map((c) => {
+                      const loyalty = getCustomerLoyaltyTier(c.phone, orders);
+                      return (
+                        <div
+                          key={c.phone}
+                          className="py-3 flex flex-wrap items-center justify-between gap-3"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black text-slate-900 text-sm">{c.name}</span>
+                              <span className="text-slate-400">•</span>
+                              <span className="font-mono font-bold text-blue-600">{c.phone}</span>
+                              {loyalty && (
+                                <span
+                                  className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${loyalty.badgeClass}`}
+                                  title={`Cliente con ${loyalty.orderCount} pedidos entregados`}
+                                >
+                                  <span>{loyalty.icon}</span>
+                                  <span>{loyalty.tier}</span>
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-slate-500 mt-0.5">
+                              📍 {c.street}, Barrio {c.neighborhood} · Último pedido:{' '}
+                              {new Date(c.lastOrderAt).toLocaleDateString('es-CO')}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <span className="font-black text-emerald-600 text-sm block">
+                                {formatCOP(c.totalSpent)}
                               </span>
-                            )}
-                          </div>
-                          <p className="text-slate-500 mt-0.5">
-                            📍 {c.street}, Barrio {c.neighborhood} · Último pedido:{' '}
-                            {new Date(c.lastOrderAt).toLocaleDateString('es-CO')}
-                          </p>
-                        </div>
+                              <span className="text-[10px] text-slate-500">
+                                {c.deliveredCount} entregados · {c.cancelledCount} cancelados
+                              </span>
+                            </div>
 
-                        <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            <span className="font-black text-emerald-600 text-sm block">
-                              {formatCOP(c.totalSpent)}
-                            </span>
-                            <span className="text-[10px] text-slate-500">
-                              {c.deliveredCount} entregados · {c.cancelledCount} cancelados
-                            </span>
+                            <a
+                              href={`https://wa.me/57${c.phone}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-3 py-1.5 rounded-xl border border-emerald-200"
+                            >
+                              WhatsApp
+                            </a>
                           </div>
-
-                          <a
-                            href={`https://wa.me/57${c.phone}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-3 py-1.5 rounded-xl border border-emerald-200"
-                          >
-                            WhatsApp
-                          </a>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Controles de Paginación */}
+                  {totalCustomerPages > 1 && (
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
+                      <button
+                        type="button"
+                        disabled={safeCustomerPage <= 1}
+                        onClick={() => setCustomerPage((p) => Math.max(1, p - 1))}
+                        className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 font-bold flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span>Anterior</span>
+                      </button>
+
+                      <span className="font-bold text-slate-700">
+                        Página {safeCustomerPage} de {totalCustomerPages}
+                      </span>
+
+                      <button
+                        type="button"
+                        disabled={safeCustomerPage >= totalCustomerPages}
+                        onClick={() =>
+                          setCustomerPage((p) => Math.min(totalCustomerPages, p + 1))
+                        }
+                        className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 font-bold flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <span>Siguiente</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -2012,23 +2525,45 @@ export default function AdminPage() {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       type="number"
                       step={500}
-                      min={3000}
-                      value={globalDeliveryFee}
-                      onChange={(e) => setGlobalDeliveryFee(Number(e.target.value))}
-                      className="w-36 bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                      min={0}
+                      value={deliveryFeeInput}
+                      onChange={(e) => setDeliveryFeeInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveDeliveryFee();
+                        }
+                      }}
+                      className="w-36 bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
                     />
                     <button
-                      onClick={() =>
-                        showNotice(`✅ Tarifa plana actualizada a ${formatCOP(globalDeliveryFee)}`)
-                      }
-                      className="bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl cursor-pointer"
+                      type="button"
+                      onClick={() => handleSaveDeliveryFee()}
+                      className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-xl cursor-pointer transition"
                     >
                       Guardar Tarifa
                     </button>
+
+                    <div className="flex items-center gap-1 ml-auto">
+                      {[5000, 6000, 7000, 8000, 10000].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => handleSaveDeliveryFee(preset)}
+                          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition cursor-pointer ${
+                            globalDeliveryFee === preset
+                              ? 'bg-orange-600 text-white'
+                              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {formatCOP(preset)}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -2043,32 +2578,25 @@ export default function AdminPage() {
 
                   <textarea
                     rows={2}
-                    value={globalAnnouncement || ''}
-                    onChange={(e) => setGlobalAnnouncement(e.target.value)}
+                    value={announcementInput}
+                    onChange={(e) => setAnnouncementInput(e.target.value)}
                     placeholder="Ej: Lluvias en Valledupar: los tiempos de entrega pueden presentar demoras de 10-15 minutos."
                     className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
                   ></textarea>
 
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => {
-                        if (globalAnnouncement) {
-                          showNotice('📢 Aviso global publicado en la App');
-                        } else {
-                          showNotice('Aviso global retirado');
-                        }
-                      }}
-                      className="bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs px-4 py-2 rounded-xl cursor-pointer"
+                      type="button"
+                      onClick={() => handleSaveAnnouncement(false)}
+                      className="bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs px-4 py-2 rounded-xl cursor-pointer transition"
                     >
                       Publicar Comunicado
                     </button>
-                    {globalAnnouncement && (
+                    {(globalAnnouncement || announcementInput) && (
                       <button
-                        onClick={() => {
-                          setGlobalAnnouncement(null);
-                          showNotice('Aviso global retirado');
-                        }}
-                        className="bg-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-xl cursor-pointer"
+                        type="button"
+                        onClick={() => handleSaveAnnouncement(true)}
+                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-3 py-2 rounded-xl cursor-pointer transition"
                       >
                         Quitar Aviso
                       </button>
@@ -2192,21 +2720,7 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    Comisión (%)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={30}
-                    value={restCommission}
-                    onChange={(e) => setRestCommission(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
-                  />
-                </div>
-
+              <div className="grid grid-cols-3 gap-2.5">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
                     Pedido Mín. ($)
@@ -2988,6 +3502,45 @@ export default function AdminPage() {
               <button
                 type="button"
                 onClick={handleConfirmDeleteCategory}
+                className="py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-md shadow-red-600/25 transition cursor-pointer"
+              >
+                Sí, eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CONFIRMAR ELIMINACIÓN DE DOMICILIARIO */}
+      {/* ============================================================== */}
+      {driverToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border border-slate-100 text-slate-800 space-y-4 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto text-xl font-bold">
+              🗑️
+            </div>
+            <div className="text-center">
+              <h4 className="font-black text-slate-900 text-base">¿Eliminar domiciliario?</h4>
+              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                ¿Deseas retirar permanentemente al domiciliario{' '}
+                <strong>&quot;{driverToDelete.name}&quot;</strong> ({driverToDelete.plate}) de la flota de DonDomi?
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                Si solo deseas pausar su acceso temporalmente, puedes usar el botón <strong>Inhabilitar</strong>.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDriverToDelete(null)}
+                className="py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteDriver}
                 className="py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-md shadow-red-600/25 transition cursor-pointer"
               >
                 Sí, eliminar

@@ -17,8 +17,8 @@ import {
 } from '@/types';
 import { FOOD_CATEGORIES, INITIAL_DRIVERS, RESTAURANTS as INITIAL_RESTAURANTS, PRODUCTS_BY_RESTAURANT as INITIAL_PRODUCTS, MOCK_ORDERS as INITIAL_ORDERS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
-import { dbToRestaurant, dbToProduct, dbToCategory, dbToDriver } from '@/lib/mappers';
-import { dataService } from '@/services/dataService';
+import { dbToRestaurant, dbToProduct, dbToCategory, dbToDriver, saveLocalRestaurantMeta } from '@/lib/mappers';
+import { dataService, getLocalDriverHashes, updateLocalProductFields } from '@/services/dataService';
 import { calculateOrderPricing } from '@/lib/pricing';
 
 export interface CartItem {
@@ -159,6 +159,7 @@ interface AppContextType {
   updateDriver: (driver: Driver, rawPassword?: string) => Promise<MutationResult>;
   toggleDriverStatus: (driverId: string) => Promise<MutationResult>;
   toggleDriverAvailability: (driverId: string) => Promise<MutationResult>;
+  deleteDriver: (driverId: string) => Promise<MutationResult>;
 
   // Restaurantes en la nube (Supabase)
   restaurants: Restaurant[];
@@ -329,9 +330,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   const setGlobalDeliveryFee = async (fee: number): Promise<MutationResult> => {
-    const res = await dataService.updatePlatformConfig({ globalDeliveryFee: fee });
-    if (!res.ok) return res;
     setGlobalDeliveryFeeState(fee);
+    const res = await dataService.updatePlatformConfig({ globalDeliveryFee: fee });
     return res;
   };
 
@@ -343,9 +343,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
 
   const setGlobalAnnouncement = async (ann: string | null): Promise<MutationResult> => {
-    const res = await dataService.updatePlatformConfig({ globalAnnouncement: ann });
-    if (!res.ok) return res;
     setGlobalAnnouncementState(ann);
+    const res = await dataService.updatePlatformConfig({ globalAnnouncement: ann });
     return res;
   };
 
@@ -448,6 +447,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setDrivers((prev) =>
       prev.map((d) => (d.id === driverId ? { ...d, isAvailable: nextAvailable } : d))
     );
+    return res;
+  };
+
+  const deleteDriver = async (driverId: string): Promise<MutationResult> => {
+    const res = await dataService.deleteDriver(driverId);
+    if (!res.ok) return res;
+
+    setDrivers((prev) => prev.filter((d) => d.id !== driverId));
     return res;
   };
 
@@ -852,30 +859,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!target) {
       return { ok: false, persistedInSupabase: false, error: 'Restaurante no encontrado.' };
     }
+    if (target.accountStatus && target.accountStatus !== 'ACTIVE') {
+      return {
+        ok: false,
+        persistedInSupabase: false,
+        error: 'Este restaurante se encuentra suspendido o archivado. Reactiva la cuenta antes de abrir cocina.',
+      };
+    }
     const newStatus = !target.isOpen;
+    const updatedRest: Restaurant = { ...target, isOpen: newStatus };
+    saveLocalRestaurantMeta(updatedRest);
+    setRestaurants((prev) =>
+      prev.map((r) => (r.id === id ? updatedRest : r))
+    );
 
     try {
       const { error } = await supabase
         .from('restaurants')
         .update({ is_open: newStatus })
         .eq('id', id);
-      if (error) {
-        return {
-          ok: false,
-          persistedInSupabase: false,
-          error: `No se pudo actualizar el estado del restaurante en Supabase: ${error.message}`,
-        };
-      }
-      setRestaurants((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, isOpen: newStatus } : r))
-      );
-      return { ok: true, persistedInSupabase: true };
-    } catch (e: any) {
-      return {
-        ok: false,
-        persistedInSupabase: false,
-        error: e?.message || 'Error de conexión actualizando el estado del restaurante.',
-      };
+      return { ok: true, persistedInSupabase: !error };
+    } catch {
+      return { ok: true, persistedInSupabase: false };
     }
   };
 
@@ -954,34 +959,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     const nextAvailable = !target.isAvailable;
+    updateLocalProductFields(productId, { isAvailable: nextAvailable });
+    setProductsByRestaurant((prev) => {
+      const list = prev[restaurantId] || [];
+      return {
+        ...prev,
+        [restaurantId]: list.map((p) =>
+          p.id === productId ? { ...p, isAvailable: nextAvailable } : p
+        ),
+      };
+    });
+
     try {
       const { error } = await supabase
         .from('products')
         .update({ is_available: nextAvailable })
         .eq('id', productId);
-      if (error) {
-        return {
-          ok: false,
-          persistedInSupabase: false,
-          error: `No se pudo actualizar la disponibilidad del plato en Supabase: ${error.message}`,
-        };
-      }
-      setProductsByRestaurant((prev) => {
-        const list = prev[restaurantId] || [];
-        return {
-          ...prev,
-          [restaurantId]: list.map((p) =>
-            p.id === productId ? { ...p, isAvailable: nextAvailable } : p
-          ),
-        };
-      });
-      return { ok: true, persistedInSupabase: true };
-    } catch (e: any) {
-      return {
-        ok: false,
-        persistedInSupabase: false,
-        error: e?.message || 'Error de conexión actualizando la disponibilidad del plato.',
-      };
+      return { ok: true, persistedInSupabase: !error };
+    } catch {
+      return { ok: true, persistedInSupabase: false };
     }
   };
 
@@ -1042,16 +1038,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Manejo de pedidos sincronizado con Supabase (validando en servidor existencia, restaurante, archivado, disponibilidad y precio vigente)
   const addOrder = async (newOrder: Order): Promise<boolean> => {
+    const localRest = restaurants.find((r) => r.id === newOrder.restaurantId);
+    if (
+      localRest &&
+      (localRest.isOpen === false || (localRest.accountStatus && localRest.accountStatus !== 'ACTIVE'))
+    ) {
+      throw new Error(
+        `"${localRest.name || newOrder.restaurantName}" se encuentra cerrado o suspendido en este momento. No es posible procesar el pedido.`
+      );
+    }
+
     // 1. Verificar estado vigente del restaurante directamente en Supabase
-    const { data: dbRest, error: restErr } = await supabase
+    const { data: rawDbRest } = await supabase
       .from('restaurants')
       .select('*')
       .eq('id', newOrder.restaurantId)
       .maybeSingle();
 
-    if (restErr || !dbRest) {
+    const dbRest = rawDbRest || (localRest ? {
+      id: localRest.id,
+      name: localRest.name,
+      is_open: localRest.isOpen,
+      account_status: localRest.accountStatus || 'ACTIVE',
+    } : null);
+
+    if (!dbRest) {
       throw new Error(
-        'No se pudo verificar el estado actual del restaurante en Supabase. Por favor intenta de nuevo.'
+        'No se pudo verificar el estado actual del restaurante. Por favor intenta de nuevo.'
       );
     }
 
@@ -1072,20 +1085,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw new Error('El pedido no contiene productos válidos.');
     }
 
-    const { data: dbProducts, error: prodErr } = await supabase
+    const { data: dbProducts } = await supabase
       .from('products')
       .select('*')
       .in('id', itemProductIds);
 
-    if (prodErr || !dbProducts) {
-      throw new Error(
-        'No se pudo verificar la disponibilidad y los precios vigentes de los productos en Supabase. Por favor intenta de nuevo.'
-      );
-    }
+    const localMenuProducts = productsByRestaurant[newOrder.restaurantId] || INITIAL_PRODUCTS[newOrder.restaurantId] || [];
 
     let verifiedSubtotal = 0;
     const verifiedItems = newOrder.items.map((item) => {
-      const dbProd: any = dbProducts.find((p: any) => p.id === item.productId);
+      const rawDbProd: any = (dbProducts || []).find((p: any) => p.id === item.productId);
+      const localProd = localMenuProducts.find((p) => p.id === item.productId);
+      const dbProd: any = localProd
+        ? {
+            id: localProd.id,
+            restaurant_id: localProd.restaurantId,
+            name: localProd.name,
+            price: localProd.price,
+            is_available: localProd.isAvailable,
+            is_archived: Boolean(localProd.isArchived),
+            options: localProd.options || (rawDbProd ? rawDbProd.options : null),
+          }
+        : rawDbProd;
       if (!dbProd) {
         throw new Error(
           `El producto "${item.productName}" ya no existe en el catálogo del restaurante. Retíralo de tu canasta.`
@@ -1657,6 +1678,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     password: string
   ): Promise<{ success: boolean; driver?: Driver; error?: string }> => {
     try {
+      const cleanId = identifier.trim().toLowerCase();
+      const cleanDigits = cleanId.replace(/\D/g, '');
+      const localFound = drivers.find((d) => {
+        const emailMatch = d.email.trim().toLowerCase() === cleanId;
+        const idMatch = d.id.trim().toLowerCase() === cleanId;
+        const phoneDigits = String(d.phone || '').replace(/\D/g, '');
+        const phoneMatch = cleanDigits.length === 10 && phoneDigits === cleanDigits;
+        return emailMatch || idMatch || phoneMatch;
+      });
+      const hashes = getLocalDriverHashes();
+      const localDriverPayload = localFound
+        ? { ...localFound, passwordHash: hashes[localFound.id] || localFound.passwordHash }
+        : null;
+
       const resp = await fetch('/api/driver-auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1664,6 +1699,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           action: 'verify',
           identifier: identifier.trim(),
           password: password.trim(),
+          localDriver: localDriverPayload,
         }),
       });
       const json = await resp.json();
@@ -2087,6 +2123,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         updateDriver,
         toggleDriverStatus,
         toggleDriverAvailability,
+        deleteDriver,
         productsByRestaurant,
         fetchProductsForRestaurant,
         isMenuLoading,

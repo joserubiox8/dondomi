@@ -18,13 +18,36 @@ export function saveLocalRestaurantMeta(rest: Restaurant) {
   try {
     const current = getLocalRestaurantsMeta();
     current[rest.id] = {
+      id: rest.id,
+      name: rest.name,
+      slug: rest.slug,
+      description: rest.description,
+      logoUrl: rest.logoUrl,
+      bannerUrl: rest.bannerUrl,
+      rating: rest.rating,
+      reviewsCount: rest.reviewsCount,
+      tags: rest.tags,
+      address: rest.address,
+      neighborhood: rest.neighborhood,
+      phone: rest.phone,
+      isOpen: rest.accountStatus && rest.accountStatus !== 'ACTIVE' ? false : rest.isOpen,
+      openingHours: rest.openingHours,
+      estimatedTimeMin: rest.estimatedTimeMin,
+      estimatedTimeMax: rest.estimatedTimeMax,
+      deliveryFeeBase: rest.deliveryFeeBase,
+      minOrderAmount: rest.minOrderAmount,
+      commissionRate: rest.commissionRate ?? 0,
+      acceptsCash: rest.acceptsCash,
+      acceptsNequi: rest.acceptsNequi,
+      acceptsDaviplata: rest.acceptsDaviplata,
+      acceptsBreb: rest.acceptsBreb ?? true,
+      acceptsCard: rest.acceptsCard ?? false,
+      pin: rest.pin,
       email: rest.email,
       accountStatus: rest.accountStatus || 'ACTIVE',
       nequiNumber: rest.nequiNumber,
       daviplataNumber: rest.daviplataNumber,
       brebKey: rest.brebKey,
-      acceptsBreb: rest.acceptsBreb,
-      acceptsCard: rest.acceptsCard,
       customCategories: rest.customCategories,
     };
     localStorage.setItem(RESTAURANT_META_STORAGE_KEY, JSON.stringify(current));
@@ -75,45 +98,55 @@ export function restaurantToDb(r: Restaurant) {
 
 export function dbToRestaurant(data: any): Restaurant {
   const seed = RESTAURANTS.find((ir) => ir.id === data.id);
-  const cleanPhone = (data.phone || seed?.phone || '3004567890').replace(/\D/g, '');
+  const localMeta = getLocalRestaurantsMeta()[data.id] || {};
+  const cleanPhone = (localMeta.phone || data.phone || seed?.phone || '3004567890').replace(/\D/g, '');
+  const resolvedAccountStatus =
+    localMeta.accountStatus || data.account_status || seed?.accountStatus || 'ACTIVE';
+  const rawIsOpen = localMeta.isOpen !== undefined ? localMeta.isOpen : (data.is_open ?? true);
 
   return {
     id: data.id,
-    name: data.name,
-    slug: data.slug,
-    description: data.description || '',
+    name: localMeta.name ?? data.name,
+    slug: localMeta.slug ?? data.slug,
+    description: localMeta.description ?? data.description ?? '',
     logoUrl:
+      localMeta.logoUrl ||
       data.logo_url ||
       'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=200&q=80',
     bannerUrl:
+      localMeta.bannerUrl ||
       data.banner_url ||
       'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80',
     rating: Number(data.rating) || 5.0,
     reviewsCount: Number(data.reviews_count) || 1,
-    tags: data.tags || ['Valledupar'],
-    address: data.address || 'Valledupar, Cesar',
-    neighborhood: data.neighborhood || 'Centro',
-    phone: data.phone || '300 000 0000',
-    isOpen: data.is_open ?? true,
-    openingHours: data.opening_hours || '11:00 AM - 10:00 PM',
-    estimatedTimeMin: data.estimated_time_min || 25,
-    estimatedTimeMax: data.estimated_time_max || 40,
-    deliveryFeeBase: Number(data.delivery_fee_base) || 7000,
-    minOrderAmount: Number(data.min_order_amount) ?? 0,
-    commissionRate: Number(data.commission_rate) || 0,
-    acceptsCash: data.accepts_cash ?? true,
-    acceptsNequi: data.accepts_nequi ?? true,
-    acceptsBreb: data.accepts_breb ?? true,
-    acceptsDaviplata: data.accepts_daviplata ?? true,
-    acceptsCard: data.accepts_card ?? false,
+    tags: localMeta.tags || data.tags || ['Valledupar'],
+    address: localMeta.address || data.address || 'Valledupar, Cesar',
+    neighborhood: localMeta.neighborhood || data.neighborhood || 'Centro',
+    phone: localMeta.phone || data.phone || '300 000 0000',
+    isOpen: resolvedAccountStatus !== 'ACTIVE' ? false : rawIsOpen,
+    openingHours: localMeta.openingHours || data.opening_hours || '11:00 AM - 10:00 PM',
+    estimatedTimeMin: localMeta.estimatedTimeMin ?? data.estimated_time_min ?? 25,
+    estimatedTimeMax: localMeta.estimatedTimeMax ?? data.estimated_time_max ?? 40,
+    deliveryFeeBase: Number(localMeta.deliveryFeeBase ?? data.delivery_fee_base) || 7000,
+    minOrderAmount: Number(localMeta.minOrderAmount ?? data.min_order_amount) ?? 0,
+    commissionRate: 0,
+    acceptsCash: localMeta.acceptsCash ?? data.accepts_cash ?? true,
+    acceptsNequi: localMeta.acceptsNequi ?? data.accepts_nequi ?? true,
+    acceptsBreb: localMeta.acceptsBreb ?? data.accepts_breb ?? true,
+    acceptsDaviplata: localMeta.acceptsDaviplata ?? data.accepts_daviplata ?? true,
+    acceptsCard: localMeta.acceptsCard ?? data.accepts_card ?? false,
     featured: false,
-    pin: data.pin || undefined,
-    email: data.email || seed?.email || `${data.slug || data.id}@dondomi.com`,
-    accountStatus: data.account_status || 'ACTIVE',
-    nequiNumber: data.nequi_number || cleanPhone,
-    daviplataNumber: data.daviplata_number || cleanPhone,
-    brebKey: data.breb_key || `@${(data.slug || 'comercio').replace(/[^a-z0-9]/gi, '')}`,
-    customCategories: Array.isArray(data.custom_categories) ? data.custom_categories : [],
+    pin: localMeta.pin || data.pin || seed?.pin || undefined,
+    email: localMeta.email || data.email || seed?.email || `${data.slug || data.id}@dondomi.com`,
+    accountStatus: resolvedAccountStatus,
+    nequiNumber: localMeta.nequiNumber || data.nequi_number || cleanPhone,
+    daviplataNumber: localMeta.daviplataNumber || data.daviplata_number || cleanPhone,
+    brebKey: localMeta.brebKey || data.breb_key || `@${(data.slug || 'comercio').replace(/[^a-z0-9]/gi, '')}`,
+    customCategories: Array.isArray(localMeta.customCategories)
+      ? localMeta.customCategories
+      : Array.isArray(data.custom_categories)
+      ? data.custom_categories
+      : [],
   };
 }
 
