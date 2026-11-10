@@ -23,17 +23,6 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
   const { restaurants, productsByRestaurant, fetchProductsForRestaurant, isMenuLoading } = useApp();
   const [selectedCategory, setSelectedCategory] = useState<string>('TODOS');
   const [activeModalProduct, setActiveModalProduct] = useState<Product | null>(null);
-  const [scrollY, setScrollY] = useState<number>(0);
-
-  // Efecto de ocultamiento suave de la portada al hacer scroll
-  useEffect(() => {
-    const handleScroll = () => {
-      setScrollY(window.scrollY || 0);
-    };
-    handleScroll();
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
 
   // Carga bajo demanda (On-Demand) del menú exclusivo de este restaurante
   useEffect(() => {
@@ -80,157 +69,133 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
     );
   }
 
-  // Progreso de scroll (0 a 1) para ocultar suavemente la portada hacia arriba
-  const collapseProgress = Math.min(1, Math.max(0, scrollY / 170));
-  const isHeaderSolid = scrollY > 95;
-
   return (
     <div className="min-h-screen bg-slate-50 pb-52 sm:pb-36">
-      {/* Barra Superior Fija: transparente sobre la portada y sólida al ocultar la portada con scroll */}
-      <div
-        className={`fixed top-0 left-0 right-0 z-40 px-4 py-3 flex items-center justify-between transition-all duration-300 ${
-          isHeaderSolid
-            ? 'bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs'
-            : 'bg-transparent'
-        }`}
-      >
-        <Link
-          href="/"
-          onClick={() => {
-            if (typeof window !== 'undefined') {
-              try {
-                sessionStorage.setItem('dondomi_home_restore_scroll', 'true');
-              } catch {}
-            }
-          }}
-          className={`w-10 h-10 rounded-full flex items-center justify-center transition shadow-sm ${
-            isHeaderSolid
-              ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-              : 'bg-black/45 hover:bg-black/65 text-white backdrop-blur-md border border-white/20'
-          }`}
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </Link>
+      {/* Barra Superior Sticky 100% sólida: protege el encabezado para que el menú nunca se asome por encima */}
+      <div className="sticky top-0 z-40 h-14 bg-white border-b border-slate-200/90 px-4 shadow-2xs">
+        <div className="max-w-3xl mx-auto h-full flex items-center justify-between">
+          <Link
+            href="/"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                try {
+                  sessionStorage.setItem('dondomi_home_restore_scroll', 'true');
+                } catch {}
+              }
+            }}
+            className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-800 transition shadow-2xs cursor-pointer flex-shrink-0"
+            title="Regresar al inicio"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
 
-        {/* Título compacto que aparece suavemente cuando la portada se oculta */}
-        <div
-          className={`flex items-center gap-2 min-w-0 px-2 transition-all duration-300 ${
-            isHeaderSolid
-              ? 'opacity-100 translate-y-0'
-              : 'opacity-0 -translate-y-2 pointer-events-none'
-          }`}
-        >
-          <div className="w-7 h-7 rounded-full overflow-hidden relative border border-slate-200 flex-shrink-0 bg-white">
+          {/* Título e identidad del restaurante */}
+          <div className="flex items-center gap-2 min-w-0 px-2 text-center">
+            <div className="w-7 h-7 rounded-full overflow-hidden relative border border-slate-200 flex-shrink-0 bg-white">
+              <Image
+                src={restaurant.logoUrl}
+                alt={restaurant.name}
+                fill
+                sizes="28px"
+                className="object-cover"
+              />
+            </div>
+            <div className="truncate text-left">
+              <h1 className="text-xs sm:text-sm font-black text-slate-900 truncate leading-tight">
+                {restaurant.name}
+              </h1>
+              <p className="text-[10px] text-slate-400 truncate leading-none">
+                Valledupar, Cesar
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end flex-shrink-0">
+            <span className="text-[11px] font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 flex items-center gap-1">
+              <MapPin className="w-3 h-3 text-orange-600" />
+              <span className="truncate max-w-[100px]">{restaurant.neighborhood}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-4 pt-3 pb-8">
+        {/* Tarjeta de portada y perfil del restaurante (diseño original compacto) */}
+        <div className="bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-2xs mb-4">
+          {/* Banner Hero Compacto */}
+          <div className="relative h-28 sm:h-36 w-full bg-slate-100">
             <Image
-              src={restaurant.logoUrl}
+              src={restaurant.bannerUrl}
               alt={restaurant.name}
               fill
-              sizes="28px"
+              priority
+              sizes="(max-width: 768px) 100vw, 768px"
               className="object-cover"
             />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+
+            <div className="absolute top-2.5 left-3">
+              {restaurant.isOpen ? (
+                <span className="bg-emerald-500 text-white text-[11px] font-black uppercase px-2.5 py-0.5 rounded-full shadow-sm flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                  Abierto
+                </span>
+              ) : (
+                <span className="bg-slate-900/90 text-slate-300 text-[11px] font-bold uppercase px-2.5 py-0.5 rounded-full backdrop-blur-xs">
+                  Cerrado
+                </span>
+              )}
+            </div>
+
+            {/* Logo y nombre superpuestos en la esquina inferior izquierda del banner */}
+            <div className="absolute bottom-2.5 left-3.5 flex items-end gap-2.5">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white p-0.5 shadow-md relative overflow-hidden border-2 border-white flex-shrink-0">
+                <Image
+                  src={restaurant.logoUrl}
+                  alt={`${restaurant.name} logo`}
+                  fill
+                  sizes="56px"
+                  className="object-cover rounded-xl"
+                />
+              </div>
+              <div className="text-white pb-0.5 min-w-0">
+                <h2 className="text-base sm:text-lg font-black drop-shadow-md leading-tight truncate">
+                  {restaurant.name}
+                </h2>
+                {restaurant.tags && restaurant.tags.length > 0 && (
+                  <p className="text-[11px] text-slate-200 drop-shadow-xs line-clamp-1">
+                    {restaurant.tags.join(' · ')}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="text-center truncate">
-            <h1 className="text-sm font-black text-slate-900 truncate">{restaurant.name}</h1>
-          </div>
-        </div>
 
-        <div className="flex justify-end">
-          <span
-            className={`text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 transition ${
-              isHeaderSolid
-                ? 'text-slate-700 bg-slate-100 border border-slate-200'
-                : 'text-white bg-black/45 backdrop-blur-md border border-white/20'
-            }`}
-          >
-            <MapPin className="w-3 h-3 text-orange-500" />
-            <span className="truncate max-w-[110px]">{restaurant.neighborhood}</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Portada Full-Width (ancho a ancho) con logo centrado en la parte inferior y ocultamiento suave al hacer scroll */}
-      <div
-        style={{
-          opacity: 1 - collapseProgress,
-          transform: `translateY(-${collapseProgress * 64}px) scale(${1 - collapseProgress * 0.04})`,
-          pointerEvents: collapseProgress > 0.85 ? 'none' : 'auto',
-        }}
-        className="relative w-full transition-transform duration-150 ease-out will-change-transform"
-      >
-        {/* Imagen de portada de ancho completo */}
-        <div className="relative h-48 sm:h-64 w-full bg-slate-900 overflow-hidden">
-          <Image
-            src={restaurant.bannerUrl}
-            alt={restaurant.name}
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-900/35 to-black/30" />
-
-          {/* Estado Abierto / Cerrado sobre la portada */}
-          <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-10">
-            {restaurant.isOpen ? (
-              <span className="bg-emerald-500 text-white text-[10px] font-black uppercase tracking-wider px-3 py-0.5 rounded-full shadow-md flex items-center gap-1.5 border border-white/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                Abierto ahora
-              </span>
-            ) : (
-              <span className="bg-slate-900/95 text-slate-300 text-[10px] font-bold uppercase tracking-wider px-3 py-0.5 rounded-full backdrop-blur-xs border border-white/15">
-                Cerrado
-              </span>
+          {/* Información del restaurante */}
+          <div className="p-3 sm:p-4 space-y-2">
+            {restaurant.description && (
+              <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
+                {restaurant.description}
+              </p>
             )}
-          </div>
-        </div>
 
-        {/* Foto de perfil / Logo centrado en la parte inferior sobre la portada */}
-        <div className="relative z-20 -mt-12 flex flex-col items-center px-4 text-center">
-          <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-white p-1 shadow-xl relative overflow-hidden border-4 border-white flex-shrink-0">
-            <Image
-              src={restaurant.logoUrl}
-              alt={`${restaurant.name} logo`}
-              fill
-              sizes="112px"
-              className="object-cover rounded-2xl"
-            />
-          </div>
-
-          <h2 className="mt-2.5 text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">
-            {restaurant.name}
-          </h2>
-
-          {restaurant.tags && restaurant.tags.length > 0 && (
-            <p className="text-xs font-bold text-orange-600 mt-0.5">
-              {restaurant.tags.join(' · ')}
-            </p>
-          )}
-
-          {restaurant.description && (
-            <p className="text-xs text-slate-600 max-w-md mt-1.5 leading-relaxed line-clamp-2">
-              {restaurant.description}
-            </p>
-          )}
-
-          <div className="mt-2.5 flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-600">
-            <span className="inline-flex items-center gap-1 bg-white px-3 py-1 rounded-full border border-slate-200/90 shadow-2xs font-medium text-slate-700">
-              <MapPin className="w-3.5 h-3.5 text-orange-600" />
-              <span>
+            {/* Dirección y Horario */}
+            <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-1.5 border-t border-slate-100 gap-1.5">
+              <span className="flex items-center gap-1 font-medium text-slate-700">
+                <MapPin className="w-3.5 h-3.5 text-orange-600" />
                 {restaurant.address} · {restaurant.neighborhood}
               </span>
-            </span>
-            <span className="inline-flex items-center gap-1 bg-white px-3 py-1 rounded-full border border-slate-200/90 shadow-2xs text-slate-600">
-              <Clock className="w-3.5 h-3.5 text-slate-400" />
-              <span>{restaurant.openingHours}</span>
-            </span>
+              <span className="text-slate-500 flex items-center gap-1">
+                <Clock className="w-3 h-3 text-slate-400" />
+                <span>Horario: {restaurant.openingHours}</span>
+              </span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="max-w-3xl mx-auto px-4 pt-4 space-y-4">
         {/* Closed Restaurant Alert Banner */}
         {!restaurant.isOpen && (
-          <div className="bg-amber-500/10 border-2 border-amber-500/30 rounded-3xl p-4 flex items-center gap-3 text-amber-900 shadow-2xs">
+          <div className="bg-amber-500/10 border-2 border-amber-500/30 rounded-3xl p-4 flex items-center gap-3 text-amber-900 shadow-2xs mb-4">
             <Info className="w-5 h-5 text-amber-600 flex-shrink-0" />
             <div>
               <h4 className="font-extrabold text-xs sm:text-sm">Restaurante cerrado temporalmente</h4>
@@ -241,8 +206,8 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
           </div>
         )}
 
-        {/* Category Pills inside Restaurant con animación y alto contraste */}
-        <div className="sticky top-[60px] z-30 bg-slate-50/95 backdrop-blur-md py-2.5 -mx-4 px-4 overflow-x-auto no-scrollbar border-b border-slate-200/60">
+        {/* Category Pills: 100% sólida y opaca, unida a la barra superior (top-14) para que el menú NUNCA pase por encima */}
+        <div className="sticky top-14 z-30 bg-white py-2.5 -mx-4 px-4 overflow-x-auto no-scrollbar border-b border-slate-200 shadow-2xs">
           <div className="flex items-center gap-2">
             {menuCategories.map((cat) => {
               const isSelected = selectedCategory === cat;
@@ -252,7 +217,7 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
                   onClick={() => setSelectedCategory(cat)}
                   className={`px-4 py-2 rounded-2xl text-xs font-black transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-95 flex items-center gap-1.5 ${
                     isSelected
-                      ? 'bg-slate-950 text-white border-2 border-orange-500 shadow-lg shadow-orange-500/25 scale-105 ring-2 ring-orange-500/30'
+                      ? 'bg-slate-950 text-white border-2 border-orange-500 shadow-md shadow-orange-500/25 ring-2 ring-orange-500/30'
                       : 'bg-white text-slate-700 border-2 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                   }`}
                 >
@@ -267,7 +232,7 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
         </div>
 
         {/* Product Cards List */}
-        <div className="space-y-3">
+        <div className="pt-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-extrabold text-base text-slate-900 tracking-tight">
               Platos y Combos

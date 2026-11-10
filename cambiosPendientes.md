@@ -82,3 +82,17 @@ Este archivo actúa como bitácora viva de mejoras, optimizaciones y ajustes ide
      - En Caja POS, al elegir `🛵 Domicilio`, el cajero puede elegir si despacha con **Flota DonDomi** o **Domiciliario Propio**, usando la tarifa global sincronizada.
      - En `/admin`, las alertas de "Sin repartidor asignado" y el selector de asignación manual de domiciliario solo aplican a órdenes a domicilio (`delivery_app`).
 * **Estado**: ✅ **Completado**
+
+---
+
+## 5. Experiencia de Catálogo y Vista del Restaurante
+
+### ✅ Item 5.1: Barra de Categorías y Encabezado 100% Opacos y Acoplados
+* **Ubicación**: `src/app/restaurant/[id]/RestaurantView.tsx`.
+* **Problema reportado**: Al desplazarse hacia abajo en la carta de un restaurante, los platos pasaban detrás de la barra de categorías y continuaban mostrándose por encima de ella en el espacio superior transparente, cortando visualmente los productos.
+* **Solución implementada**:
+  1. **Encabezado superior sólido (`sticky top-0 z-40 h-14 bg-white`)**: Barra blanca 100% opaca con botón de retorno al catálogo, logo, nombre del restaurante y barrio.
+  2. **Barra de categorías acoplada sin espacios (`sticky top-14 z-30 bg-white`)**: Fondo blanco sólido acoplado exactamente al borde inferior del encabezado superior (56px / `top-14`) sin márgenes superiores (`mt-0`) que dejen huecos.
+  3. **Comportamiento visual estricto**: Al hacer scroll hacia abajo, los platos se deslizan exclusivamente por debajo de la barra de categorías (`z-30`) y del encabezado (`z-40`), sin ser visibles por encima ni detrás de ellos.
+* **Estado**: ✅ **Completado**
+
