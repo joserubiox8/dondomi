@@ -210,7 +210,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   // Obtener cuenta de transferencia del negocio según el medio elegido
   const getTransferAccountInfo = (method: string, targetRest?: Restaurant) => {
     const rest = targetRest || currentRestaurant || placedOrderRestaurant;
-    const fallbackPhone = (rest?.phone || '3004567890').replace(/\D/g, '');
+    const fallbackPhone = (rest?.phone || '3053004882').replace(/\D/g, '');
     if (method === 'NEQUI') {
       return {
         label: 'Cuenta Nequi del Restaurante',
@@ -247,7 +247,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
     const targetRest =
       restaurants.find((r) => r.id === order.restaurantId || r.name === order.restaurantName) ||
       currentRestaurant;
-    const rawPhone = targetRest?.phone || '3004567890';
+    const rawPhone = targetRest?.phone || '3053004882';
     const cleanPhone = rawPhone.replace(/\D/g, '');
     const phoneWithCountry = cleanPhone.startsWith('57') ? cleanPhone : `57${cleanPhone}`;
 

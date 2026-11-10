@@ -866,7 +866,12 @@ export default function AdminPage() {
     return elapsedMin >= 8;
   });
   const unassignedReadyOrders = activeOrders.filter(
-    (o) => o.status === 'READY_FOR_PICKUP' && !o.driverId
+    (o) =>
+      o.status === 'READY_FOR_PICKUP' &&
+      !o.driverId &&
+      o.orderChannel !== 'pos_local' &&
+      o.orderChannel !== 'pos_takeout' &&
+      o.deliveryFleet !== 'PROPIO'
   );
   const incidentOrders = activeOrders.filter((o) => Boolean(o.incidentReason));
 
@@ -1742,22 +1747,41 @@ export default function AdminPage() {
                         </div>
                         <p className="text-slate-600">
                           Cliente: <strong>{o.customerName}</strong> ({o.customerPhone}) ·{' '}
-                          {o.deliveryAddress.street}, {o.deliveryAddress.neighborhood}
+                          {o.orderChannel === 'pos_local'
+                            ? `🍽️ Consumo en Salón (${o.tableNumber || 'Mesa'})`
+                            : o.orderChannel === 'pos_takeout'
+                            ? '🛍️ Retiro en Mostrador (Para Llevar)'
+                            : `${o.deliveryAddress.street}, ${o.deliveryAddress.neighborhood}`}
                         </p>
                         <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                          {o.orderChannel === 'pos_local' ? (
+                            <span className="text-[11px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded-md font-bold">
+                              🍽️ POS En Mesa ({o.tableNumber || 'Salón'})
+                            </span>
+                          ) : o.orderChannel === 'pos_takeout' ? (
+                            <span className="text-[11px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-bold">
+                              🛍️ POS Para Llevar
+                            </span>
+                          ) : (
+                            <span className="text-[11px] bg-blue-50 text-blue-800 px-2 py-0.5 rounded-md font-bold">
+                              🛵 Domicilio
+                            </span>
+                          )}
                           <span className="text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-bold">
                             Pago: {o.paymentMethod} ({o.paymentStatus === 'COMPLETED' ? 'Verificado' : 'Pendiente'})
                           </span>
-                          {o.driverName ? (
-                            <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-bold">
-                              🛵 {o.driverName} ({o.deliveryFleet === 'PROPIO' ? 'Flota Propia' : 'DonDomi'})
-                            </span>
-                          ) : (
-                            o.status !== 'CANCELLED' &&
-                            o.status !== 'DELIVERED' && (
-                              <span className="text-[11px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-md font-bold">
-                                Sin repartidor asignado
+                          {o.orderChannel !== 'pos_local' && o.orderChannel !== 'pos_takeout' && (
+                            o.driverName ? (
+                              <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-bold">
+                                🛵 {o.driverName} ({o.deliveryFleet === 'PROPIO' ? 'Flota Propia' : 'DonDomi'})
                               </span>
+                            ) : (
+                              o.status !== 'CANCELLED' &&
+                              o.status !== 'DELIVERED' && (
+                                <span className="text-[11px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-md font-bold">
+                                  Sin repartidor asignado
+                                </span>
+                              )
                             )
                           )}
                           {o.rating && (
@@ -3149,9 +3173,11 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* Asignar o Reasignar Domiciliario Manualmente */}
+            {/* Asignar o Reasignar Domiciliario Manualmente (Solo para órdenes a domicilio) */}
             {inspectingOrder.status !== 'DELIVERED' &&
-              inspectingOrder.status !== 'CANCELLED' && (
+              inspectingOrder.status !== 'CANCELLED' &&
+              inspectingOrder.orderChannel !== 'pos_local' &&
+              inspectingOrder.orderChannel !== 'pos_takeout' && (
                 <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-200 space-y-2.5 text-xs">
                   <span className="font-extrabold text-blue-950 block">
                     Asignación Manual de Repartidor DonDomi

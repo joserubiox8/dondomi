@@ -24,6 +24,7 @@ import {
   calculateDriverSettlement,
   filterOrdersByPeriod,
   isOwnFleetOrder,
+  isPosInStoreOrder,
 } from '@/lib/pricing';
 import { Order } from '@/types';
 
@@ -91,22 +92,25 @@ export default function DriverPage() {
   const isAvailable = driverRecord ? driverRecord.isAvailable !== false : true;
 
   // Pedido activo asignado a este repartidor (en recogida PREPARING/READY_FOR_PICKUP o en ruta ON_THE_WAY)
+  // Excluye estrictamente órdenes de consumo en salón (pos_local) o retiro en mostrador (pos_takeout)
   const activeOrder = useMemo(
     () =>
       orders.find(
         (o) =>
+          !isPosInStoreOrder(o) &&
           (o.driverId === driverId || o.driverName === driverName) &&
           (o.status === 'ON_THE_WAY' || o.status === 'READY_FOR_PICKUP' || o.status === 'PREPARING')
       ),
     [orders, driverId, driverName]
   );
 
-  // Pedidos disponibles en el radar: solo los que la cocina YA aceptó (PREPARING o READY_FOR_PICKUP),
-  // que no tengan domiciliario asignado y que no sean de flota propia del restaurante.
+  // Pedidos disponibles en el radar: solo los pedidos a domicilio que la cocina YA aceptó (PREPARING o READY_FOR_PICKUP),
+  // que no tengan domiciliario asignado, que no sean de flota propia del restaurante y que NUNCA sean órdenes en mesa/mostrador.
   const availableOrders = useMemo(
     () =>
       orders.filter(
         (o) =>
+          !isPosInStoreOrder(o) &&
           (o.status === 'READY_FOR_PICKUP' || o.status === 'PREPARING') &&
           !o.driverId &&
           !isOwnFleetOrder(o) &&
@@ -120,6 +124,7 @@ export default function DriverPage() {
     () =>
       orders.filter(
         (o) =>
+          !isPosInStoreOrder(o) &&
           (o.driverId === driverId || o.driverName === driverName) &&
           o.status === 'DELIVERED' &&
           !isOwnFleetOrder(o)

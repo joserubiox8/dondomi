@@ -155,6 +155,30 @@ export function isOwnFleetOrder(order: Order): boolean {
 }
 
 /**
+ * Determina si una orden es de consumo en local ("En Mesa") o retiro en mostrador ("Para Llevar")
+ * generada por el sistema POS, y por lo tanto NO debe asignarse ni mostrarse nunca a domiciliarios.
+ */
+export function isPosInStoreOrder(order: Order): boolean {
+  if (order.orderChannel === 'pos_local' || order.orderChannel === 'pos_takeout') return true;
+  if (order.customerNotes && /\[Canal:\s*pos_(local|takeout)/i.test(order.customerNotes)) return true;
+  if (
+    order.deliveryAddress?.label &&
+    /^(En Mesa|Para Llevar)/i.test(order.deliveryAddress.label)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Determina si una orden requiere un domiciliario de la flota DonDomi
+ * (es decir, es un pedido a domicilio y no es de mesa/mostrador ni de flota propia).
+ */
+export function isDondomiFleetDeliveryOrder(order: Order): boolean {
+  return !isPosInStoreOrder(order) && !isOwnFleetOrder(order);
+}
+
+/**
  * Determina si el método de pago de una orden es en efectivo.
  */
 export function isCashPayment(paymentMethod?: string): boolean {

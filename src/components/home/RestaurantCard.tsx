@@ -28,9 +28,19 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
   const bannerSrc = restaurant.bannerUrl || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1000&q=80';
   const logoSrc = restaurant.logoUrl || 'https://images.unsplash.com/photo-1598103442097-8b74394b95c6?auto=format&fit=crop&w=200&q=80';
 
+  const handleCardClick = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('dondomi_home_scroll_y', String(window.scrollY));
+        sessionStorage.setItem('dondomi_home_restore_scroll', 'true');
+      } catch {}
+    }
+  };
+
   return (
     <Link
       href={`/restaurant/${restaurant.id}`}
+      onClick={handleCardClick}
       className="group block bg-white rounded-3xl overflow-hidden border border-slate-200/80 shadow-xs hover:shadow-md transition-all duration-300 transform hover:-translate-y-0.5 active:scale-[0.99]"
     >
       {/* Banner Image Container */}

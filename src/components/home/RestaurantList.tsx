@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { FOOD_CATEGORIES } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import RestaurantCard from './RestaurantCard';
@@ -8,6 +8,41 @@ import { Store, UtensilsCrossed } from 'lucide-react';
 
 export default function RestaurantList() {
   const { searchQuery, selectedCategorySlug, restaurants, categories } = useApp();
+
+  // Restaurar posición de scroll al regresar desde el menú de un restaurante
+  useEffect(() => {
+    if (typeof window === 'undefined' || restaurants.length === 0) return;
+    try {
+      const shouldRestore = sessionStorage.getItem('dondomi_home_restore_scroll');
+      const savedY = sessionStorage.getItem('dondomi_home_scroll_y');
+      if (shouldRestore === 'true' && savedY !== null) {
+        const targetY = Number(savedY);
+        if (!isNaN(targetY) && targetY > 0) {
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: targetY, behavior: 'instant' });
+            setTimeout(() => {
+              window.scrollTo({ top: targetY, behavior: 'instant' });
+            }, 60);
+          });
+        }
+        sessionStorage.removeItem('dondomi_home_restore_scroll');
+      }
+    } catch {}
+  }, [restaurants.length]);
+
+  // Guardar continuamente el scroll mientras el usuario navega en la lista principal
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onScroll = () => {
+      try {
+        if (window.location.pathname === '/') {
+          sessionStorage.setItem('dondomi_home_scroll_y', String(window.scrollY));
+        }
+      } catch {}
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Encontrar el nombre de la categoría seleccionada (si aplica)
   const activeCategory = useMemo(() => {

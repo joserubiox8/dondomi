@@ -96,6 +96,13 @@ export default function RestaurantView({ restaurantId }: RestaurantViewProps) {
       >
         <Link
           href="/"
+          onClick={() => {
+            if (typeof window !== 'undefined') {
+              try {
+                sessionStorage.setItem('dondomi_home_restore_scroll', 'true');
+              } catch {}
+            }
+          }}
           className={`w-10 h-10 rounded-full flex items-center justify-center transition shadow-sm ${
             isHeaderSolid
               ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'

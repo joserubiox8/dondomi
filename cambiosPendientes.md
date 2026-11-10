@@ -11,99 +11,74 @@ Este archivo actúa como bitácora viva de mejoras, optimizaciones y ajustes ide
 
 ---
 
-## 1. Rendimiento y Escalabilidad de Catálogo
+## 1. Experiencia de Navegación y Scroll del Cliente
 
-### ✅ Item 1.1: Carga Progresiva y Ordenamiento Inteligente de Restaurantes
-* **Ubicación**: `src/components/home/RestaurantList.tsx` y `src/services/dataService.ts`.
-* **Problema resuelto**: Se eliminó el renderizado masivo y se implementó ordenamiento por conveniencia natural y carga por lotes.
+### ✅ Item 1.1: Restauración de Posición de Scroll al Retroceder (Back Navigation)
+* **Ubicación**: `src/components/home/RestaurantList.tsx`, `src/components/home/RestaurantCard.tsx`, `src/app/restaurant/[id]/RestaurantView.tsx`.
+* **Problema reportado**: Al entrar al menú de un restaurante y luego presionar el botón "Atrás" del navegador o el botón de regresar, el cliente volvía a la parte superior de la página principal en lugar de conservar la posición exacta de la lista en la que se encontraba.
 * **Solución implementada**:
-  1. **Ordenamiento Inteligente**:
-     - Restaurantes abiertos (`isOpen: true`) aparecen siempre de primero, ordenados por menor tiempo estimado de entrega y mejor calificación.
-     - Restaurantes cerrados (`isOpen: false`) se desplazan automáticamente al final de la lista.
-     - Cumplimiento 100% de la regla de imparcialidad (sin etiquetas engañosas de "Destacado").
-  2. **Carga Progresiva por Lotes**:
-     - Lote inicial de 12 comercios (`PAGE_SIZE = 12`).
-     - Detección automática de proximidad con `IntersectionObserver` y botón de respaldo *"Cargar más restaurantes (X restantes)"*.
-* **Estado**: ✅ **Completado** (2026-11-08).
-
-### ✅ Item 1.2: Carga Bajo Demanda de Menús por Restaurante (On-Demand / Lazy Loading)
-* **Ubicación**: `src/context/AppContext.tsx`, `src/services/dataService.ts`, `src/app/restaurant/[id]/RestaurantView.tsx`, `src/app/merchant/page.tsx` y `src/app/admin/page.tsx`.
-* **Problema resuelto**: Se eliminó la descarga masiva de la tabla de productos al inicio de la aplicación, evitando transferencias pesadas en redes móviles 4G de Valledupar.
-* **Solución implementada**:
-  1. Se removió `dataService.getProducts()` de la carga inicial global (`AppContext.tsx`).
-  2. Se creó el método `dataService.getProductsByRestaurant(restaurantId)` que consulta únicamente los platos no archivados del comercio seleccionado (`.eq('restaurant_id', id)`).
-  3. Se incorporó caché en memoria por sesión en `AppContext` (`fetchProductsForRestaurant`) para evitar repetir peticiones de red si el cliente regresa al mismo restaurante.
-  4. En `RestaurantView.tsx` se diseñó un elegante esqueleto de carga (*skeleton loader*) pulsante mientras se obtienen los platos.
-  5. En `/merchant` y `/admin` se integró la carga bajo demanda para asegurar disponibilidad inmediata en Caja POS y gestión de cartas.
-* **Estado**: ✅ **Completado** (2026-11-08).
+  1. Se registra continuamente y al hacer clic sobre cualquier tarjeta de restaurante la posición vertical de scroll (`dondomi_home_scroll_y` + flag `dondomi_home_restore_scroll = 'true'`) en `sessionStorage`.
+  2. Al regresar al catálogo principal (`/`), `RestaurantList.tsx` restaura instantáneamente (`behavior: 'instant'`) el scroll exacto donde quedó el usuario.
+* **Estado**: ✅ **Completado**
 
 ---
 
-## 2. Simplificación de Interfaz y Experiencia de Usuario (Home / Header)
+## 2. Catálogo y Datos de Prueba para Validación
 
-### ✅ Item 2.1: Depuración del Filtro "Abiertos Ahora" en Home
-* **Ubicación**: `src/components/home/SearchBar.tsx`.
-* **Problema resuelto**: Se eliminó el botón redundante "Abiertos ahora" en el buscador superior.
+### ✅ Item 2.1: Expansión del Catálogo a 30 Restaurantes y Población Completa de Menús
+* **Ubicación**: `src/data/mockData.ts`.
+* **Problema reportado**: Existían pocos comercios de prueba y algunos restaurantes tenían la carta vacía sin platos disponibles para ordenar.
 * **Solución implementada**:
-  - Al posicionar los restaurantes abiertos siempre arriba de forma automática, el botón manual resultaba innecesario.
-  - La barra ahora solo muestra la píldora de filtro de categoría cuando el usuario selecciona una especialidad (Pizza, Hamburguesas, Pollo, etc.), permitiéndole cerrarla con 1 clic.
-* **Estado**: ✅ **Completado** (2026-11-08).
+  1. Se amplió `RESTAURANTS` en `src/data/mockData.ts` a **30 restaurantes** (`rest-1` a `rest-30`) distribuidos por barrios reales de Valledupar (Novalito, Los Cortijos, San Vicente, Las Flores, Centro, Pontevedra, Guatapuri, etc.) y abarcando todas las categorías gastronómicas.
+  2. Se pobló `PRODUCTS_BY_RESTAURANT` con menús completos de **4 a 5 platos por restaurante** para los 30 comercios, garantizando 0 cartas vacías.
+* **Estado**: ✅ **Completado**
 
-### ✅ Item 2.2: Eliminación del Historial de Clientes ("Mis Pedidos") en el Menú Principal
-* **Ubicación**: `src/components/common/Header.tsx`.
-* **Problema resuelto**: Enfoque de compra directa (*"pedido hecho, pedido muerto"*).
+### ✅ Item 2.2: WhatsApp Global de Pruebas Unificado (3053004882)
+* **Ubicación**: `src/data/mockData.ts`, `src/lib/mappers.ts`, `src/components/restaurant/CartDrawer.tsx`.
+* **Problema reportado**: Se necesitaba enviar todos los pedidos de prueba al número activo de WhatsApp del usuario (`3053004882`).
 * **Solución implementada**:
-  - Se retiró el botón "Mis Pedidos" y su modal del encabezado público del cliente.
-  - Se preservó el banner flotante de pedido activo (`ActiveOrderBanner.tsx`) para seguimiento de pedidos en curso.
-  - El historial contable y trazabilidad completa de órdenes se mantiene 100% activo y protegido para el Restaurante (`/merchant`) y el Administrador (`/admin`).
-* **Estado**: ✅ **Completado** (2026-11-08).
-
-### ✅ Item 2.3: Rediseño del Header: Protagonismo del Logo y Acceso Administrativo Oculto ("Easter Egg Login")
-* **Ubicación**: `src/components/common/Header.tsx`.
-* **Problema resuelto**: Mayor presencia de marca y eliminación del botón explícito "Ingresar".
-* **Solución implementada**:
-  1. Isotipo `DD` y tipografía `DonDomi Valledupar` ampliados con mayor escala, contraste y sombras cálidas.
-  2. **Acceso Oculto (*Easter Egg*)**: Al hacer clic o tocar el logo de DonDomi, se redirige directamente a la pantalla `/login`, permitiendo a dueños de restaurantes, repartidores y administradores autenticarse sin ensuciar la interfaz del consumidor final.
-* **Estado**: ✅ **Completado** (2026-11-08).
+  1. Se configuró `TEST_WHATSAPP_PHONE = '3053004882'` en los 30 restaurantes de `src/data/mockData.ts`.
+  2. Se actualizó `dbToRestaurant` en `src/lib/mappers.ts` y el generador de WhatsApp en `src/components/restaurant/CartDrawer.tsx` para que incluso los restaurantes cargados desde Supabase utilicen `3053004882` por defecto.
+* **Estado**: ✅ **Completado**
 
 ---
 
-## 3. Experiencia de Compra y Selección de Platos (Carta / Modal)
+## 3. Experiencia y Operación de Cocina / KDS (/merchant)
 
-### ✅ Item 3.1: Reseteo Automático del Formulario de Plato al Abrir el Modal ("Instrucciones a la Cocina")
-* **Ubicación**: `src/components/restaurant/ProductModal.tsx` y `src/app/restaurant/[id]/RestaurantView.tsx`.
-* **Problema resuelto**: Los comentarios e instrucciones especiales escritas para un plato ya no se quedan pegados en el siguiente plato que el cliente selecciona.
+### ✅ Item 3.1: Organización de Comandas en Cocina por Pestañas Claras de Flujo Operativo
+* **Ubicación**: `src/app/merchant/page.tsx` (Módulo KDS).
+* **Problema reportado**: Se requería organizar los pedidos de cocina en una cantidad adecuada de pestañas operativas con nombres claros y diferenciados.
 * **Solución implementada**:
-  1. En `ProductModal.tsx`, se implementó un `useEffect` sincronizado con `product?.id` que reinicializa `notes = ''`, `quantity = 1`, `selectedByGroup = {}` y `modalError = null`.
-  2. En `RestaurantView.tsx`, se forzó el ciclo de vida de React mediante `key={activeModalProduct?.id || 'product-modal-closed'}` para garantizar que el modal nazca completamente limpio al abrir un nuevo producto.
-### ✅ Item 3.2: Restauración Fiel de la Estructura Original de Portada y Perfil del Restaurante
-* **Ubicación**: `src/app/restaurant/[id]/RestaurantView.tsx`.
-* **Problema resuelto**: Se restauró la distribución original exacta de la cabecera del restaurante solicitada por el usuario (portada de ancho completo, logo centrado superpuesto sobre el borde inferior, información centrada y diseño visual intacto).
-* **Solución implementada**:
-  1. Portada *full-width* de borde a borde con gradiente cinematográfico y ocultamiento suave al hacer scroll.
-  2. Logo/foto de perfil en tarjeta blanca centrada (`-mt-12 flex flex-col items-center text-center`) sobre el borde inferior de la portada.
-  3. Insignia de estado "Abierto ahora" / "Cerrado", nombre, tags, descripción y píldoras de dirección y horarios centrados.
-  4. Barra fija de categorías en negro (`bg-slate-950`) con píldoras de navegación.
-* **Estado**: ✅ **Completado** (2026-11-08).
+  - Se organizó la vista de cocina en **5 pestañas operativas dedicadas** con contadores en vivo y filtro adicional por modalidad (`Todos`, `🍽️ En Mesa`, `🛍️ Para Llevar`, `🛵 Domicilios`):
+    1. **🔔 Por Aceptar** (`PENDING`): Nuevas órdenes entrantes por confirmar.
+    2. **👨‍🍳 En Preparación** (`PREPARING`): Comandas aceptadas cocinándose en fogones.
+    3. **🛵 Listos / Despacho** (`READY_FOR_PICKUP` / `ON_THE_WAY`): Pedidos listos en barra o en camino con el domiciliario.
+    4. **✅ Completados** (`DELIVERED`): Pedidos servidos en mesa o entregados al cliente.
+    5. **❌ Cancelados** (`CANCELLED`): Pedidos rechazados o anulados con motivo.
+* **Estado**: ✅ **Completado**
 
-### ✅ Item 3.3: Carga Bajo Demanda Real + Fusión Individual de Carta por Restaurante
-* **Ubicación**: `src/context/AppContext.tsx`, `src/services/dataService.ts` y `src/app/restaurant/[id]/RestaurantView.tsx`.
-* **Problema resuelto**:
-  1. Antes, `getProductsByRestaurant(restaurantId)` reemplazaba por completo el menú base del restaurante si encontraba 1 solo plato (o 1 plato archivado) en Supabase, causando que se vieran menos platos o que la carta saliera en blanco.
-  2. Además, `fetchProductsForRestaurant` no estaba memoizado con `useCallback`, provocando re-ejecuciones del `useEffect` al cambiar el estado de carga.
+### ✅ Item 3.2: Rediseño Sutil y No Invasivo del Acceso a "Modo Pantalla Cocina"
+* **Ubicación**: `src/app/merchant/page.tsx`.
+* **Problema reportado**: La tarjeta oscura gigante de "Modo Pantalla Cocina (KDS Fullscreen)" era sumamente invasiva para la vista diaria del cajero.
 * **Solución implementada**:
-  1. La página de inicio (`/`) arranca con `productsByRestaurant = {}` y **no** descarga los menús de todos los restaurantes.
-  2. Al entrar a un restaurante, `fetchProductsForRestaurant(restaurantId)` (estabilizado con `useCallback`, `loadedMenusRef` e `inFlightMenusRef`) solicita **únicamente** los platos de ese comercio.
-  3. En `dataService.getProductsByRestaurant(restaurantId)` se fusionan los platos de ese restaurante en Supabase sobre su base individual (`INITIAL_PRODUCTS[restaurantId]`), garantizando que jamás falten platos ni aparezcan cartas vacías.
-* **Estado**: ✅ **Completado** (2026-11-08).
-
-### ✅ Item 1.3: Carga Inmediata y Persistente de Imágenes al Retroceder (Back Navigation)
-* **Ubicación**: `src/components/home/RestaurantList.tsx` y `src/components/home/RestaurantCard.tsx`.
-* **Problema resuelto**: Al volver atrás desde la página de un restaurante a la página principal, las imágenes de los comercios fallaban en mostrarse.
-* **Solución implementada**:
-  1. Se eliminó la paginación por cortes (`visibleCount`) y el `IntersectionObserver` que desmontaba tarjetas en la transición de ruta/bfcache.
-  2. Todos los restaurantes se renderizan de forma directa y estable, respetando la regla: abiertos de primero y cerrados al final.
-  3. Se aseguraron URLs de respaldo (*fallback*) tanto para el banner como para el logo en `RestaurantCard.tsx`.
-* **Estado**: ✅ **Completado** (2026-11-08).
+  - Se eliminó por completo la tarjeta gigante y se reemplazó por un botón compacto y discreto (`Modo Monitor` + botón de timbre `🔊`) integrado sutilmente en la barra de búsqueda y filtros de cocina.
+* **Estado**: ✅ **Completado**
 
 ---
+
+## 4. Auditoría Integral y Blindaje Operativo del Sistema POS
+
+### ✅ Item 4.1: Segregación Estricta de Órdenes POS de Consumo Local vs. Domicilios
+* **Ubicación**: `src/lib/pricing.ts`, `src/app/driver/page.tsx`, `src/context/AppContext.tsx`, `src/app/merchant/page.tsx`, `src/app/admin/page.tsx`.
+* **Problema reportado**: Si el cajero recibía una orden para comer en el restaurante (`pos_local` / En Mesa) o para llevar en mostrador (`pos_takeout`), dicha orden le aparecía en el radar a los domiciliarios (`/driver`), lo cual era un error grave de flujo operativo.
+* **Solución implementada**:
+  1. **Funciones de segregación en `src/lib/pricing.ts`**: Se crearon `isPosInStoreOrder(order)` e `isDondomiFleetDeliveryOrder(order)` para identificar de manera inequívoca las órdenes de salón (`pos_local`) y mostrador (`pos_takeout`).
+  2. **Bloqueo total en el panel de Domiciliarios (`/driver`) y `AppContext.tsx`**:
+     - `availableOrders`, `activeOrder` y `allDriverDeliveredOrders` en `/driver` excluyen estrictamente cualquier orden con `!isPosInStoreOrder(o)`.
+     - `claimOrder`, `dispatchWithOwnDriver` y `assignDriverByAdmin` en `AppContext.tsx` rechazan cualquier intento de reclamar o asignar un repartidor a órdenes `pos_local` o `pos_takeout`.
+  3. **Flujo diferenciado en Caja POS, Cocina (`/merchant`) y Admin (`/admin`)**:
+     - Las órdenes `pos_local` muestran claramente `🍽️ Servicio en Salón: Mesa X (Consumo local · Sin domiciliario)` y se completan con el botón **"Servir en Mesa (Completar)"**.
+     - Las órdenes `pos_takeout` muestran `🛍️ Entrega en Mostrador: Para Llevar` y se completan con **"Entregar en Mostrador (Completar)"**.
+     - En Caja POS, al elegir `🛵 Domicilio`, el cajero puede elegir si despacha con **Flota DonDomi** o **Domiciliario Propio**, usando la tarifa global sincronizada.
+     - En `/admin`, las alertas de "Sin repartidor asignado" y el selector de asignación manual de domiciliario solo aplican a órdenes a domicilio (`delivery_app`).
+* **Estado**: ✅ **Completado**

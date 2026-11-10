@@ -1359,14 +1359,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const target = orders.find((o) => o.id === orderId);
     if (!target) return { success: false, error: 'Pedido no encontrado' };
 
+    if (target.orderChannel === 'pos_local' || target.orderChannel === 'pos_takeout') {
+      return {
+        success: false,
+        error: 'Esta orden es de consumo en local o retiro en mostrador y no requiere domiciliario.',
+      };
+    }
+
     if (target.status !== 'READY_FOR_PICKUP' && target.status !== 'PREPARING') {
       return {
         success: false,
         error: 'Este pedido aún no ha sido aceptado por la cocina o ya no está disponible.',
       };
     }
-    if (target.driverId) {
-      return { success: false, error: 'Esta carrera ya fue tomada por otro domiciliario.' };
+    if (target.driverId || target.deliveryFleet === 'PROPIO') {
+      return { success: false, error: 'Esta carrera ya fue tomada por otro domiciliario o es de flota propia.' };
     }
 
     const driverId = currentUser?.id || `drv-${Date.now()}`;
@@ -1375,6 +1382,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const existingActive = orders.find(
       (o) =>
         o.id !== orderId &&
+        o.orderChannel !== 'pos_local' &&
+        o.orderChannel !== 'pos_takeout' &&
         (o.driverId === driverId || o.driverName === driverName) &&
         (o.status === 'ON_THE_WAY' || o.status === 'READY_FOR_PICKUP' || o.status === 'PREPARING')
     );
@@ -1449,6 +1458,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const dispatchWithOwnDriver = async (orderId: string): Promise<boolean> => {
     const target = orders.find((o) => o.id === orderId);
     if (!target) return false;
+    if (target.orderChannel === 'pos_local' || target.orderChannel === 'pos_takeout') {
+      return false;
+    }
 
     const cleanBaseNotes = (target.customerNotes || '').replace(/\s*\|?\s*\[Flota:\s*\w+\]/gi, '').trim();
     const updatedNotes = cleanBaseNotes ? `${cleanBaseNotes} | [Flota: PROPIO]` : `[Flota: PROPIO]`;
@@ -1488,6 +1500,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const assignDriverByAdmin = async (orderId: string, driver: Driver | null): Promise<boolean> => {
     const target = orders.find((o) => o.id === orderId);
     if (!target) return false;
+    if (target.orderChannel === 'pos_local' || target.orderChannel === 'pos_takeout') {
+      return false;
+    }
 
     const nextDriverId = driver ? driver.id : undefined;
     const nextDriverName = driver ? driver.name : undefined;

@@ -99,7 +99,8 @@ export function restaurantToDb(r: Restaurant) {
 export function dbToRestaurant(data: any): Restaurant {
   const seed = RESTAURANTS.find((ir) => ir.id === data.id);
   const localMeta = getLocalRestaurantsMeta()[data.id] || {};
-  const cleanPhone = (localMeta.phone || data.phone || seed?.phone || '3004567890').replace(/\D/g, '');
+  const unifiedTestPhone = '3053004882';
+  const cleanPhone = (localMeta.phone || unifiedTestPhone).replace(/\D/g, '');
   const resolvedAccountStatus =
     localMeta.accountStatus || data.account_status || seed?.accountStatus || 'ACTIVE';
   const rawIsOpen = localMeta.isOpen !== undefined ? localMeta.isOpen : (data.is_open ?? true);
@@ -122,7 +123,7 @@ export function dbToRestaurant(data: any): Restaurant {
     tags: localMeta.tags || data.tags || ['Valledupar'],
     address: localMeta.address || data.address || 'Valledupar, Cesar',
     neighborhood: localMeta.neighborhood || data.neighborhood || 'Centro',
-    phone: localMeta.phone || data.phone || '300 000 0000',
+    phone: localMeta.phone || unifiedTestPhone,
     isOpen: resolvedAccountStatus !== 'ACTIVE' ? false : rawIsOpen,
     openingHours: localMeta.openingHours || data.opening_hours || '11:00 AM - 10:00 PM',
     estimatedTimeMin: localMeta.estimatedTimeMin ?? data.estimated_time_min ?? 25,

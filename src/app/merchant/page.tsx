@@ -71,7 +71,8 @@ import {
 } from '@/types';
 
 type MerchantTab = 'KDS' | 'POS' | 'MENU' | 'HORARIOS' | 'VENTAS';
-type KdsFilter = 'ACTIVOS' | 'NUEVOS' | 'EN_COCINA' | 'EN_RUTA' | 'ENTREGADOS' | 'CANCELADOS';
+type KdsFilter = 'NUEVOS' | 'EN_COCINA' | 'EN_RUTA' | 'ENTREGADOS' | 'CANCELADOS';
+type KdsChannelFilter = 'TODOS' | 'pos_local' | 'pos_takeout' | 'delivery_app';
 
 export default function MerchantPage() {
   const {
@@ -94,6 +95,7 @@ export default function MerchantPage() {
     loginWithEmail,
     logout,
     addOrder,
+    globalDeliveryFee,
   } = useApp();
 
   // Estado para autenticación individual de tienda en modo producción
@@ -121,7 +123,8 @@ export default function MerchantPage() {
   };
 
   const [activeTab, setActiveTab] = useState<MerchantTab>('KDS');
-  const [kdsFilter, setKdsFilter] = useState<KdsFilter>('ACTIVOS');
+  const [kdsFilter, setKdsFilter] = useState<KdsFilter>('NUEVOS');
+  const [kdsChannelFilter, setKdsChannelFilter] = useState<KdsChannelFilter>('TODOS');
   const [kdsSearch, setKdsSearch] = useState<string>('');
   const [audioEnabled, setAudioEnabled] = useState<boolean>(true);
   const prevPendingCountRef = useRef<number>(0);
@@ -202,6 +205,7 @@ export default function MerchantPage() {
   const [posCustomerName, setPosCustomerName] = useState<string>('');
   const [posDeliveryAddress, setPosDeliveryAddress] = useState<string>('');
   const [posDeliveryNeighborhood, setPosDeliveryNeighborhood] = useState<string>('Centro');
+  const [posDeliveryFleet, setPosDeliveryFleet] = useState<'DONDOMI' | 'PROPIO'>('DONDOMI');
   const [posPaymentType, setPosPaymentType] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'DIVIDIDO'>('EFECTIVO');
   const [posTransferPlatform, setPosTransferPlatform] = useState<TransferPlatform>('Nequi');
   const [posCashTendered, setPosCashTendered] = useState<string>('');
@@ -453,14 +457,22 @@ export default function MerchantPage() {
   const deliveredOrders = restaurantOrders.filter((o) => o.status === 'DELIVERED');
   const cancelledOrders = restaurantOrders.filter((o) => o.status === 'CANCELLED');
 
+  // Si inicialmente no hay pedidos en NUEVOS pero sí en EN_COCINA, iniciar en EN_COCINA para comodidad del cajero
+  const didInitKdsTabRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!didInitKdsTabRef.current && restaurantOrders.length > 0) {
+      didInitKdsTabRef.current = true;
+      if (pendingOrders.length === 0 && preparingOrders.length > 0) {
+        setKdsFilter('EN_COCINA');
+      } else if (pendingOrders.length === 0 && preparingOrders.length === 0 && readyOrDispatchedOrders.length > 0) {
+        setKdsFilter('EN_RUTA');
+      }
+    }
+  }, [restaurantOrders.length, pendingOrders.length, preparingOrders.length, readyOrDispatchedOrders.length]);
+
   const filteredKdsOrders = restaurantOrders.filter((o) => {
     const matchesTab =
-      kdsFilter === 'ACTIVOS'
-        ? o.status === 'PENDING' ||
-          o.status === 'PREPARING' ||
-          o.status === 'READY_FOR_PICKUP' ||
-          o.status === 'ON_THE_WAY'
-        : kdsFilter === 'NUEVOS'
+      kdsFilter === 'NUEVOS'
         ? o.status === 'PENDING'
         : kdsFilter === 'EN_COCINA'
         ? o.status === 'PREPARING'
@@ -470,14 +482,22 @@ export default function MerchantPage() {
         ? o.status === 'DELIVERED'
         : o.status === 'CANCELLED';
 
+    const resolvedChannel: OrderChannel =
+      o.orderChannel === 'pos_local' || o.orderChannel === 'pos_takeout'
+        ? o.orderChannel
+        : 'delivery_app';
+    const matchesChannel =
+      kdsChannelFilter === 'TODOS' || resolvedChannel === kdsChannelFilter;
+
     const q = kdsSearch.trim().toLowerCase();
     const matchesSearch =
       !q ||
       o.orderNumber.toLowerCase().includes(q) ||
       o.customerName.toLowerCase().includes(q) ||
-      o.customerPhone.includes(q);
+      o.customerPhone.includes(q) ||
+      (o.tableNumber && o.tableNumber.toLowerCase().includes(q));
 
-    return matchesTab && matchesSearch;
+    return matchesTab && matchesChannel && matchesSearch;
   });
 
   // Actualización del cronómetro en vivo para SLA de cocina (cada 5 segundos)
@@ -1012,7 +1032,8 @@ export default function MerchantPage() {
     return posCart.reduce((acc, item) => acc + item.itemTotal, 0);
   }, [posCart]);
 
-  const posDeliveryFee = posChannel === 'delivery_app' ? 7000 : 0;
+  const effectiveDeliveryFee = globalDeliveryFee || 7000;
+  const posDeliveryFee = posChannel === 'delivery_app' ? effectiveDeliveryFee : 0;
   const posTotal = posCartSubtotal + posDeliveryFee;
 
   const handleAddDirectToPos = (prod: Product) => {
@@ -1189,6 +1210,8 @@ export default function MerchantPage() {
       const orderNumber = `DD-${Math.floor(1000 + Math.random() * 9000)}`;
       const newOrderId = `ord-pos-${Date.now()}`;
 
+      const isOwnDelivery = posChannel === 'delivery_app' && posDeliveryFleet === 'PROPIO';
+
       const newOrder: Order = {
         id: newOrderId,
         orderNumber,
@@ -1211,13 +1234,38 @@ export default function MerchantPage() {
             posChannel === 'pos_local'
               ? `En Mesa (${posTableNumber.trim()})`
               : posChannel === 'pos_takeout'
-              ? 'Para Llevar'
+              ? 'Para Llevar (Mostrador)'
+              : isOwnDelivery
+              ? 'Domicilio Flota Propia'
               : 'Domicilio DonDomi',
-          street: posChannel === 'delivery_app' ? posDeliveryAddress.trim() : (restaurant.address || 'Valledupar, Cesar'),
-          neighborhood: posChannel === 'delivery_app' ? posDeliveryNeighborhood.trim() : (restaurant.neighborhood || 'Centro'),
+          street:
+            posChannel === 'delivery_app'
+              ? posDeliveryAddress.trim()
+              : posChannel === 'pos_local'
+              ? `Consumo en Salón (${posTableNumber.trim()})`
+              : 'Retiro en Mostrador del Restaurante',
+          neighborhood:
+            posChannel === 'delivery_app'
+              ? posDeliveryNeighborhood.trim()
+              : restaurant.neighborhood || 'Valledupar',
           city: 'Valledupar',
         },
-        customerNotes: posChannel === 'pos_local' ? `Servicio en ${posTableNumber.trim()}` : undefined,
+        customerNotes:
+          posChannel === 'pos_local'
+            ? `Servicio en ${posTableNumber.trim()}`
+            : posChannel === 'pos_takeout'
+            ? 'Pedido empacado para llevar en mostrador'
+            : isOwnDelivery
+            ? 'Despacho con Domiciliario Propio | [Flota: PROPIO]'
+            : undefined,
+        driverId: isOwnDelivery ? 'propio' : undefined,
+        driverName: isOwnDelivery ? 'Domiciliario Propio' : undefined,
+        deliveryFleet:
+          posChannel === 'delivery_app'
+            ? isOwnDelivery
+              ? 'PROPIO'
+              : 'DONDOMI'
+            : undefined,
         createdAt: new Date().toISOString(),
         orderChannel: posChannel,
         tableNumber: posChannel === 'pos_local' ? posTableNumber.trim() : undefined,
@@ -1230,6 +1278,7 @@ export default function MerchantPage() {
       await addOrder(newOrder);
 
       setPosSuccessOrder(newOrder);
+      setKdsFilter('EN_COCINA');
       setPosCart([]);
       setPosCustomerPhone('');
       setPosCustomerName('');
@@ -1237,7 +1286,7 @@ export default function MerchantPage() {
       setPosSplitCash('');
       setPosSplitTransfer('');
       setPosDeliveryAddress('');
-      showNotice(`✅ ¡Venta POS #${orderNumber} cobrada y enviada a cocina!`);
+      showNotice(`✅ ¡Venta POS #${orderNumber} cobrada y enviada a En Preparación!`);
     } catch (err: any) {
       setPosError(err?.message || 'Error guardando pedido en Supabase.');
     } finally {
@@ -1489,138 +1538,257 @@ export default function MerchantPage() {
         {/* PESTAÑA 1: COMANDAS EN VIVO (KDS) */}
         {/* ============================================================== */}
         {activeTab === 'KDS' && (
-          <div className="space-y-4">
-            {/* Métricas de Comanda & Filtros Rápidos */}
-            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+          <div className="space-y-3.5">
+            {/* Pestañas Operativas de Cocina (5 Etapas Claras) */}
+            <div className="bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs grid grid-cols-2 sm:grid-cols-5 gap-1.5">
               <button
-                onClick={() => setKdsFilter('ACTIVOS')}
-                className={`p-3 rounded-2xl border text-center transition cursor-pointer ${
-                  kdsFilter === 'ACTIVOS'
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                type="button"
+                onClick={() => setKdsFilter('NUEVOS')}
+                className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 ${
+                  kdsFilter === 'NUEVOS'
+                    ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                    : 'bg-white border-slate-100 text-slate-700 hover:bg-amber-50/50'
                 }`}
               >
-                <span className="text-[10px] font-bold uppercase opacity-75 block">En Curso</span>
-                <span className="text-lg font-black mt-0.5 block">
-                  {pendingOrders.length + preparingOrders.length + readyOrDispatchedOrders.length}
+                <div className="min-w-0">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-85 block truncate">
+                    🔔 Por Aceptar
+                  </span>
+                  <span className="text-[11px] font-medium opacity-75 hidden sm:block truncate">
+                    Nuevas entrantes
+                  </span>
+                </div>
+                <span
+                  className={`text-sm font-black px-2 py-0.5 rounded-lg shrink-0 ${
+                    kdsFilter === 'NUEVOS'
+                      ? 'bg-white/20 text-white'
+                      : pendingOrders.length > 0
+                      ? 'bg-amber-100 text-amber-800 animate-pulse'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {pendingOrders.length}
                 </span>
               </button>
 
               <button
-                onClick={() => setKdsFilter('NUEVOS')}
-                className={`p-3 rounded-2xl border text-center transition cursor-pointer ${
-                  kdsFilter === 'NUEVOS'
-                    ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
-                    : 'bg-white border-slate-200 text-amber-600 hover:bg-amber-50/40'
-                }`}
-              >
-                <span className="text-[10px] font-bold uppercase opacity-75 block">Nuevos</span>
-                <span className="text-lg font-black mt-0.5 block">{pendingOrders.length}</span>
-              </button>
-
-              <button
+                type="button"
                 onClick={() => setKdsFilter('EN_COCINA')}
-                className={`p-3 rounded-2xl border text-center transition cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 ${
                   kdsFilter === 'EN_COCINA'
                     ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                    : 'bg-white border-slate-200 text-blue-600 hover:bg-blue-50/40'
+                    : 'bg-white border-slate-100 text-slate-700 hover:bg-blue-50/50'
                 }`}
               >
-                <span className="text-[10px] font-bold uppercase opacity-75 block">En Cocina</span>
-                <span className="text-lg font-black mt-0.5 block">{preparingOrders.length}</span>
+                <div className="min-w-0">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-85 block truncate">
+                    👨‍🍳 En Preparación
+                  </span>
+                  <span className="text-[11px] font-medium opacity-75 hidden sm:block truncate">
+                    Cocinándose
+                  </span>
+                </div>
+                <span
+                  className={`text-sm font-black px-2 py-0.5 rounded-lg shrink-0 ${
+                    kdsFilter === 'EN_COCINA'
+                      ? 'bg-white/20 text-white'
+                      : preparingOrders.length > 0
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {preparingOrders.length}
+                </span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setKdsFilter('EN_RUTA')}
-                className={`p-3 rounded-2xl border text-center transition cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 ${
                   kdsFilter === 'EN_RUTA'
                     ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                    : 'bg-white border-slate-200 text-indigo-600 hover:bg-indigo-50/40'
+                    : 'bg-white border-slate-100 text-slate-700 hover:bg-indigo-50/50'
                 }`}
               >
-                <span className="text-[10px] font-bold uppercase opacity-75 block">Listos / Ruta</span>
-                <span className="text-lg font-black mt-0.5 block">{readyOrDispatchedOrders.length}</span>
+                <div className="min-w-0">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-85 block truncate">
+                    🛵 Listos / Despacho
+                  </span>
+                  <span className="text-[11px] font-medium opacity-75 hidden sm:block truncate">
+                    En barra o ruta
+                  </span>
+                </div>
+                <span
+                  className={`text-sm font-black px-2 py-0.5 rounded-lg shrink-0 ${
+                    kdsFilter === 'EN_RUTA'
+                      ? 'bg-white/20 text-white'
+                      : readyOrDispatchedOrders.length > 0
+                      ? 'bg-indigo-100 text-indigo-800'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {readyOrDispatchedOrders.length}
+                </span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setKdsFilter('ENTREGADOS')}
-                className={`p-3 rounded-2xl border text-center transition cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 ${
                   kdsFilter === 'ENTREGADOS'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                    : 'bg-white border-slate-200 text-emerald-600 hover:bg-emerald-50/40'
+                    : 'bg-white border-slate-100 text-slate-700 hover:bg-emerald-50/50'
                 }`}
               >
-                <span className="text-[10px] font-bold uppercase opacity-75 block">Entregados</span>
-                <span className="text-lg font-black mt-0.5 block">{deliveredOrders.length}</span>
+                <div className="min-w-0">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-85 block truncate">
+                    ✅ Completados
+                  </span>
+                  <span className="text-[11px] font-medium opacity-75 hidden sm:block truncate">
+                    Servidos / Entregados
+                  </span>
+                </div>
+                <span
+                  className={`text-sm font-black px-2 py-0.5 rounded-lg shrink-0 ${
+                    kdsFilter === 'ENTREGADOS'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-emerald-50 text-emerald-700'
+                  }`}
+                >
+                  {deliveredOrders.length}
+                </span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setKdsFilter('CANCELADOS')}
-                className={`p-3 rounded-2xl border text-center transition cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 col-span-2 sm:col-span-1 ${
                   kdsFilter === 'CANCELADOS'
                     ? 'bg-red-600 text-white border-red-600 shadow-sm'
-                    : 'bg-white border-slate-200 text-red-600 hover:bg-red-50/40'
+                    : 'bg-white border-slate-100 text-slate-700 hover:bg-red-50/50'
                 }`}
               >
-                <span className="text-[10px] font-bold uppercase opacity-75 block">Cancelados</span>
-                <span className="text-lg font-black mt-0.5 block">{cancelledOrders.length}</span>
+                <div className="min-w-0">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-85 block truncate">
+                    ❌ Cancelados
+                  </span>
+                  <span className="text-[11px] font-medium opacity-75 hidden sm:block truncate">
+                    Rechazados / Anulados
+                  </span>
+                </div>
+                <span
+                  className={`text-sm font-black px-2 py-0.5 rounded-lg shrink-0 ${
+                    kdsFilter === 'CANCELADOS'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-red-50 text-red-700'
+                  }`}
+                >
+                  {cancelledOrders.length}
+                </span>
               </button>
             </div>
 
-            {/* Banner Acceso Rápido a Modo Pantalla de Cocina (KDS Fullscreen) */}
-            <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-orange-950 p-4 rounded-3xl text-white shadow-md flex flex-col sm:flex-row items-center justify-between gap-3 border border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-orange-600/30 border border-orange-500/40 flex items-center justify-center shrink-0">
-                  <Flame className="w-5 h-5 text-orange-400 animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="font-black text-sm text-white flex items-center gap-2">
-                    <span>Modo Pantalla Cocina (KDS Fullscreen)</span>
-                    <span className="text-[10px] bg-orange-500/30 text-orange-300 font-extrabold px-2 py-0.5 rounded-full border border-orange-400/30">
-                      Para Monitor / Tablet
-                    </span>
-                  </h4>
-                  <p className="text-xs text-slate-300 mt-0.5">
-                    Vista Dark UI de alto contraste con cronómetro SLA, campanada sonora en vivo y botones táctiles gigantes.
-                  </p>
+            {/* Barra de Herramientas Sutil: Título, Filtro de Modalidad, Buscador y Botón Discreto de Monitor KDS */}
+            <div className="bg-white px-3.5 py-2.5 rounded-2xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 flex items-center gap-1.5 mr-1">
+                  <ChefHat className="w-4 h-4 text-orange-600 shrink-0" />
+                  <span>
+                    {kdsFilter === 'NUEVOS' && 'Por Aceptar'}
+                    {kdsFilter === 'EN_COCINA' && 'En Preparación'}
+                    {kdsFilter === 'EN_RUTA' && 'Listos y En Despacho'}
+                    {kdsFilter === 'ENTREGADOS' && 'Completados'}
+                    {kdsFilter === 'CANCELADOS' && 'Cancelados'} ({filteredKdsOrders.length})
+                  </span>
+                </h3>
+
+                {/* Píldoras de filtro por canal */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setKdsChannelFilter('TODOS')}
+                    className={`px-2 py-1 rounded-lg transition cursor-pointer ${
+                      kdsChannelFilter === 'TODOS'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKdsChannelFilter('pos_local')}
+                    className={`px-2 py-1 rounded-lg transition cursor-pointer ${
+                      kdsChannelFilter === 'pos_local'
+                        ? 'bg-purple-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🍽️ En Mesa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKdsChannelFilter('pos_takeout')}
+                    className={`px-2 py-1 rounded-lg transition cursor-pointer ${
+                      kdsChannelFilter === 'pos_takeout'
+                        ? 'bg-amber-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🛍️ Para Llevar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKdsChannelFilter('delivery_app')}
+                    className={`px-2 py-1 rounded-lg transition cursor-pointer ${
+                      kdsChannelFilter === 'delivery_app'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🛵 Domicilios
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <div className="relative flex-1 sm:w-56">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={kdsSearch}
+                    onChange={(e) => setKdsSearch(e.target.value)}
+                    placeholder="Buscar #DD, mesa, cliente..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !audioEnabled;
+                    setAudioEnabled(next);
+                    if (next) playKitchenBellChime();
+                  }}
+                  className={`p-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1 cursor-pointer shrink-0 ${
+                    audioEnabled
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                      : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+                  }`}
+                  title={audioEnabled ? 'Timbre de cocina activo' : 'Timbre silenciado'}
+                >
+                  {audioEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setIsKdsFullscreen(true)}
-                  className="w-full sm:w-auto bg-orange-600 hover:bg-orange-500 text-white font-black text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-orange-600/20 cursor-pointer active:scale-95"
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-2xs"
+                  title="Abrir monitor de cocina en pantalla completa (KDS)"
                 >
-                  <Maximize2 className="w-4 h-4" />
-                  <span>Abrir Pantalla Completa</span>
+                  <Maximize2 className="w-3.5 h-3.5 text-orange-400" />
+                  <span className="hidden md:inline">Modo Monitor</span>
                 </button>
-              </div>
-            </div>
-
-            {/* Buscador de Comandas */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
-                <ChefHat className="w-4 h-4 text-orange-600" />
-                <span>
-                  {kdsFilter === 'ACTIVOS' && 'Pedidos Activos en Cocina y Despacho'}
-                  {kdsFilter === 'NUEVOS' && 'Pedidos Nuevos por Confirmar'}
-                  {kdsFilter === 'EN_COCINA' && 'Pedidos en Preparación'}
-                  {kdsFilter === 'EN_RUTA' && 'Pedidos Empacados o En Ruta'}
-                  {kdsFilter === 'ENTREGADOS' && 'Historial de Pedidos Entregados'}
-                  {kdsFilter === 'CANCELADOS' && 'Pedidos Rechazados o Cancelados'} ({filteredKdsOrders.length})
-                </span>
-              </h3>
-
-              <div className="relative w-full sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={kdsSearch}
-                  onChange={(e) => setKdsSearch(e.target.value)}
-                  placeholder="Buscar #DD, cliente o celular..."
-                  className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
               </div>
             </div>
 
@@ -1630,11 +1798,27 @@ export default function MerchantPage() {
                 <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center space-y-2">
                   <Clock className="w-8 h-8 text-slate-300 mx-auto" />
                   <p className="font-bold text-slate-700 text-sm">
-                    No hay pedidos en esta bandeja ({kdsFilter})
+                    {kdsFilter === 'NUEVOS' && 'No tienes pedidos nuevos pendientes por aceptar'}
+                    {kdsFilter === 'EN_COCINA' && 'No hay comandas en preparación en este momento'}
+                    {kdsFilter === 'EN_RUTA' && 'No hay pedidos listos en barra ni en ruta'}
+                    {kdsFilter === 'ENTREGADOS' && 'Aún no hay pedidos completados con este filtro'}
+                    {kdsFilter === 'CANCELADOS' && 'No hay pedidos cancelados o rechazados'}
                   </p>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    Cuando un cliente ordene en DonDomi, sonará el timbre de cocina y aparecerá aquí inmediatamente.
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    {kdsFilter === 'NUEVOS' && preparingOrders.length > 0
+                      ? `Tienes ${preparingOrders.length} comanda(s) cocinándose en la pestaña "👨‍🍳 En Preparación".`
+                      : 'Cuando ingrese un nuevo pedido o registres una venta en Caja POS, aparecerá automáticamente en su etapa correspondiente.'}
                   </p>
+                  {kdsFilter === 'NUEVOS' && preparingOrders.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setKdsFilter('EN_COCINA')}
+                      className="mt-2 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs px-4 py-2 rounded-xl transition cursor-pointer shadow-xs"
+                    >
+                      <ChefHat className="w-3.5 h-3.5" />
+                      <span>Ver {preparingOrders.length} en preparación</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -1678,7 +1862,9 @@ export default function MerchantPage() {
                             ) : (
                               <span className="bg-blue-100 text-blue-900 border border-blue-200 px-2 py-0.5 rounded-lg text-xs font-black flex items-center gap-1">
                                 <span>🛵</span>
-                                <span>Domicilio App</span>
+                                <span>
+                                  {order.deliveryFleet === 'PROPIO' ? 'Domicilio Propio' : 'Domicilio DonDomi'}
+                                </span>
                               </span>
                             )}
 
@@ -1697,15 +1883,17 @@ export default function MerchantPage() {
                             <span className="text-xs font-bold text-slate-700">
                               Cliente: {order.customerName}
                             </span>
-                            <a
-                              href={`tel:${order.customerPhone}`}
-                              className="text-xs text-blue-600 hover:underline font-bold"
-                            >
-                              ({order.customerPhone})
-                            </a>
+                            {order.customerPhone && order.customerPhone !== '0000000000' && (
+                              <a
+                                href={`tel:${order.customerPhone}`}
+                                className="text-xs text-blue-600 hover:underline font-bold"
+                              >
+                                ({order.customerPhone})
+                              </a>
+                            )}
 
-                            {/* Semáforo SLA de Tiempo */}
-                            {renderSlaBadge(order.createdAt)}
+                            {/* Semáforo SLA de Tiempo (solo en pedidos activos) */}
+                            {!isDelivered && !isCancelled && renderSlaBadge(order.createdAt)}
 
                             {order.customerPhone && order.customerPhone.replace(/\D/g, '') !== '0000000000' && order.customerPhone.replace(/\D/g, '').length === 10 && (
                               <button
@@ -1767,20 +1955,34 @@ export default function MerchantPage() {
 
                           {order.customerNotes && (
                             <p className="text-[11px] text-amber-800 bg-amber-50 p-2 rounded-xl border border-amber-200 mt-1">
-                              ⚠️ Nota del cliente: &quot;{order.customerNotes}&quot;
+                              ⚠️ Nota: &quot;{order.customerNotes}&quot;
                             </p>
                           )}
                         </div>
 
-                        {/* Entrega y Forma de pago */}
+                        {/* Destino / Modalidad y Forma de pago */}
                         <div className="text-xs text-slate-600 flex flex-wrap items-center justify-between gap-2">
-                          <span>
-                            📍 Dirección:{' '}
-                            <strong>
-                              {order.deliveryAddress.street}, {order.deliveryAddress.neighborhood}
-                            </strong>
-                            {order.deliveryAddress.reference && ` (${order.deliveryAddress.reference})`}
-                          </span>
+                          {order.orderChannel === 'pos_local' ? (
+                            <span className="text-purple-900 font-bold">
+                              🍽️ Servicio en Salón:{' '}
+                              <strong>{order.tableNumber || 'Mesa en Restaurante'}</strong>{' '}
+                              <span className="text-slate-400 font-normal">(Consumo local · Sin domiciliario)</span>
+                            </span>
+                          ) : order.orderChannel === 'pos_takeout' ? (
+                            <span className="text-amber-900 font-bold">
+                              🛍️ Entrega en Mostrador:{' '}
+                              <strong>Para Llevar</strong>{' '}
+                              <span className="text-slate-400 font-normal">(Cliente retira en caja · Sin domiciliario)</span>
+                            </span>
+                          ) : (
+                            <span>
+                              📍 Dirección Entrega:{' '}
+                              <strong>
+                                {order.deliveryAddress.street}, {order.deliveryAddress.neighborhood}
+                              </strong>
+                              {order.deliveryAddress.reference && ` (${order.deliveryAddress.reference})`}
+                            </span>
+                          )}
 
                           <div className="flex items-center gap-2 flex-wrap">
                             {order.isSplitPayment ? (
@@ -1827,7 +2029,9 @@ export default function MerchantPage() {
                             )}
 
                             <span className="font-bold text-slate-700">
-                              Comida: {formatCOP(order.subtotal)} · Domicilio: {formatCOP(order.deliveryFee)}
+                              {isPosOrder
+                                ? `Subtotal Salón/Mostrador: ${formatCOP(order.subtotal)}`
+                                : `Comida: ${formatCOP(order.subtotal)} · Domicilio: ${formatCOP(order.deliveryFee)}`}
                             </span>
                           </div>
                         </div>
@@ -1863,7 +2067,7 @@ export default function MerchantPage() {
                                   >
                                     <CheckCircle2 className="w-4 h-4" />
                                     <span>
-                                      {order.orderChannel === 'pos_local' ? `Servir en ${order.tableNumber || 'Mesa'}` : 'Entregar al Cliente'}
+                                      {order.orderChannel === 'pos_local' ? `Servir en ${order.tableNumber || 'Mesa'} (Completar)` : 'Entregar en Mostrador (Completar)'}
                                     </span>
                                   </button>
                                   <button
@@ -1871,7 +2075,7 @@ export default function MerchantPage() {
                                     className="bg-amber-600 hover:bg-amber-500 text-white font-black py-2.5 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
                                   >
                                     <PackageCheck className="w-4 h-4" />
-                                    <span>Listo en Barra</span>
+                                    <span>Pasar a Listo en Barra</span>
                                   </button>
                                 </>
                               ) : (
@@ -1882,7 +2086,9 @@ export default function MerchantPage() {
                                   >
                                     <PackageCheck className="w-4 h-4" />
                                     <span>
-                                      {order.driverName
+                                      {order.deliveryFleet === 'PROPIO'
+                                        ? 'Empacado · Listo para Domiciliario Propio'
+                                        : order.driverName
                                         ? `Empacado · Avisar a ${order.driverName}`
                                         : 'Empacado · Solicitar Repartidor DonDomi'}
                                     </span>
@@ -1907,14 +2113,16 @@ export default function MerchantPage() {
                               <div className="text-xs text-amber-900">
                                 <span className="font-bold block">
                                   {order.orderChannel === 'pos_local'
-                                    ? `Listo para servir en ${order.tableNumber || 'Mesa'}`
+                                    ? `🍽️ Listo en barra para servir en ${order.tableNumber || 'Mesa'}`
                                     : order.orderChannel === 'pos_takeout'
-                                    ? 'Listo para entrega en mostrador'
-                                    : 'Listo para recogida en mostrador'}
+                                    ? '🛍️ Empacado y listo para entregar al cliente en mostrador'
+                                    : '🛵 Empacado y listo para recogida de domicilio'}
                                 </span>
                                 <span className="text-[11px] text-amber-700">
                                   {order.orderChannel === 'pos_local' || order.orderChannel === 'pos_takeout'
-                                    ? 'Comida emplatada o empacada esperando ser servida al comensal.'
+                                    ? 'Orden exclusiva de salón/mostrador (no visible para domiciliarios).'
+                                    : order.deliveryFleet === 'PROPIO'
+                                    ? 'Asignado a domiciliario propio del restaurante.'
                                     : order.driverName
                                     ? `Repartidor DonDomi asignado: ${order.driverName} (en camino al restaurante)`
                                     : 'Visible en el radar de domiciliarios DonDomi'}
@@ -1927,7 +2135,11 @@ export default function MerchantPage() {
                                     className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2 px-4 rounded-xl text-xs transition shadow-md cursor-pointer flex items-center gap-1.5"
                                   >
                                     <CheckCircle2 className="w-4 h-4" />
-                                    <span>Marcar Entregado</span>
+                                    <span>
+                                      {order.orderChannel === 'pos_local'
+                                        ? `Servido en ${order.tableNumber || 'Mesa'}`
+                                        : 'Entregado en Mostrador'}
+                                    </span>
                                   </button>
                                 ) : (
                                   <>
@@ -1981,7 +2193,11 @@ export default function MerchantPage() {
                               <div className="font-bold text-emerald-700 flex items-center gap-1.5">
                                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                                 <span>
-                                  Entregado ({order.deliveryFleet === 'PROPIO' ? 'Flota Propia' : `Repartidor: ${order.driverName || 'DonDomi'}`})
+                                  {order.orderChannel === 'pos_local'
+                                    ? `Servido en Salón (${order.tableNumber || 'Mesa'})`
+                                    : order.orderChannel === 'pos_takeout'
+                                    ? 'Entregado en Mostrador (Para Llevar)'
+                                    : `Entregado a Domicilio (${order.deliveryFleet === 'PROPIO' ? 'Flota Propia' : `Repartidor: ${order.driverName || 'DonDomi'}`})`}
                                 </span>
                               </div>
                               {order.rating && (
@@ -2227,13 +2443,13 @@ export default function MerchantPage() {
                   >
                     <span className="text-base block">🛵</span>
                     <span className="text-[10px] font-extrabold block mt-0.5">Domicilio</span>
-                    <span className="text-[9px] opacity-80 block">+$7.000 COP</span>
+                    <span className="text-[9px] opacity-80 block">+{formatCOP(effectiveDeliveryFee)}</span>
                   </button>
                 </div>
 
                 {/* Subcampo según canal */}
                 {posChannel === 'pos_local' && (
-                  <div className="pt-1">
+                  <div className="pt-1 space-y-1">
                     <input
                       type="text"
                       value={posTableNumber}
@@ -2241,6 +2457,17 @@ export default function MerchantPage() {
                       placeholder="Identificador (ej. Mesa 4, Barra 2, Salón B)..."
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
+                    <p className="text-[10px] text-purple-700 font-medium px-1">
+                      ✓ Orden exclusiva de salón · No se enviará al radar de domiciliarios.
+                    </p>
+                  </div>
+                )}
+
+                {posChannel === 'pos_takeout' && (
+                  <div className="pt-1">
+                    <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200/70 rounded-xl px-2.5 py-1.5 font-medium">
+                      🛍️ El cliente retira su pedido empacado en mostrador · No se enviará a domiciliarios.
+                    </p>
                   </div>
                 )}
 
@@ -2260,6 +2487,30 @@ export default function MerchantPage() {
                       placeholder="Barrio (ej. Novalito, Alfonso López, Las Flores)..."
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
+                    <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setPosDeliveryFleet('DONDOMI')}
+                        className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border transition cursor-pointer ${
+                          posDeliveryFleet === 'DONDOMI'
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        🛵 Flota DonDomi
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPosDeliveryFleet('PROPIO')}
+                        className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border transition cursor-pointer ${
+                          posDeliveryFleet === 'PROPIO'
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        🏠 Domi Propio
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2611,7 +2862,7 @@ export default function MerchantPage() {
                 <div className="flex justify-between text-slate-600">
                   <span>Tarifa Domicilio:</span>
                   <span className="font-bold text-slate-800">
-                    {posChannel === 'delivery_app' ? formatCOP(7000) : '$0 COP'}
+                    {posChannel === 'delivery_app' ? formatCOP(posDeliveryFee) : '$0 COP'}
                   </span>
                 </div>
                 <div className="flex justify-between text-slate-900 font-black text-base pt-1.5 border-t border-slate-200">
