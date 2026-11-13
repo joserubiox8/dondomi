@@ -96,3 +96,20 @@ Este archivo actúa como bitácora viva de mejoras, optimizaciones y ajustes ide
   3. **Comportamiento visual estricto**: Al hacer scroll hacia abajo, los platos se deslizan exclusivamente por debajo de la barra de categorías (`z-30`) y del encabezado (`z-40`), sin ser visibles por encima ni detrás de ellos.
 * **Estado**: ✅ **Completado**
 
+---
+
+## 6. Identidad Visual y Paleta de Colores
+
+### ✅ Item 6.1: Migración de Paleta de Página Principal a Amarillo (Remoción Total del Naranja)
+* **Ubicación**: `src/components/common/Header.tsx`, `src/components/home/CategoryChips.tsx`, `src/components/home/SearchBar.tsx`, `src/components/home/RestaurantCard.tsx`, `src/components/home/RestaurantList.tsx`, `src/components/home/ActiveOrderBanner.tsx`, `src/components/home/PromoBanner.tsx`, `src/components/common/LocationModal.tsx`, `src/components/common/PwaInstallPrompt.tsx`, `src/components/restaurant/CartFloatBar.tsx`, `src/components/restaurant/CartDrawer.tsx`, `src/app/globals.css`, `src/app/layout.tsx`.
+* **Problema reportado**: Se solicitó cambiar la paleta de colores de la página principal por amarillo y remover completamente el color naranja.
+* **Solución implementada**:
+  1. **Variables y Tema**: Se actualizaron `--brand-primary: #eab308;` y `--brand-primary-hover: #ca8a04;` en `globals.css`, así como `themeColor: '#EAB308'` y `selection:bg-yellow-400 selection:text-slate-950` en `layout.tsx`.
+  2. **Encabezado y Logo**: Logo 'DD' en degradado amarillo vibrante (`from-yellow-400 to-amber-400` con texto `slate-950`), nombre `Don<span className="text-yellow-500">Domi</span>`, botón de domicilio e indicador de canasta en amarillo.
+  3. **Categorías y Búsqueda**: Botones de categorías seleccionadas con anillo y fondo amarillo (`ring-yellow-400 bg-yellow-400`), textos activos en `text-yellow-700`, y borde/anillo del buscador en `focus:border-yellow-400`.
+  4. **Tarjetas de Restaurantes**: Pines de barrio, hover sobre títulos de comercios e íconos de tiempo/domicilio en amarillo (`text-yellow-400` / `text-yellow-600`).
+  5. **Banner de Pedido Activo y Canasta Flotante**: Banner de entrega en camino y barra de canasta inferior rediseñados en degradado amarillo de alto contraste con texto oscuro y pastillas contrastantes.
+  6. **Modal de Barrios y PWA**: Indicadores de barrio seleccionado y botones de instalación PWA migrados a amarillo.
+* **Estado**: ✅ **Completado**
+
+

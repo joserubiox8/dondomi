@@ -71,7 +71,7 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
 
           {/* Barrio Pill (muestra ubicación sin sesgo de calificaciones) */}
           <div className="bg-slate-950/80 backdrop-blur-md text-white text-xs font-bold px-2.5 py-1 rounded-xl shadow-sm flex items-center gap-1 border border-white/20">
-            <MapPin className="w-3 h-3 text-orange-400" />
+            <MapPin className="w-3 h-3 text-yellow-400" />
             <span className="truncate max-w-[120px]">{restaurant.neighborhood}</span>
           </div>
         </div>
@@ -80,7 +80,7 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
         <div className="absolute bottom-3 left-3 right-3 text-white">
           <div className="flex items-end justify-between gap-2">
             <div>
-              <h3 className="font-extrabold text-lg sm:text-xl text-white drop-shadow-sm leading-tight group-hover:text-orange-200 transition">
+              <h3 className="font-extrabold text-lg sm:text-xl text-white drop-shadow-sm leading-tight group-hover:text-yellow-300 transition">
                 {restaurant.name}
               </h3>
               <p className="text-xs text-slate-200 font-medium line-clamp-1 mt-0.5">
@@ -112,7 +112,7 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
           {/* Estimated time */}
           <div className="flex items-center gap-1.5 font-medium">
             <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
-              <Clock className="w-3.5 h-3.5 text-orange-600" />
+              <Clock className="w-3.5 h-3.5 text-yellow-600" />
             </div>
             <div>
               <span className="font-bold text-slate-900">
@@ -126,7 +126,7 @@ export default function RestaurantCard({ restaurant }: RestaurantCardProps) {
           {/* Delivery Fee */}
           <div className="flex items-center gap-1.5">
             <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
-              <Bike className="w-3.5 h-3.5 text-orange-600" />
+              <Bike className="w-3.5 h-3.5 text-yellow-600" />
             </div>
             <div>
               <span className="text-[10px] text-slate-500 block leading-none">Domicilio</span>

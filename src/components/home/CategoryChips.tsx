@@ -11,9 +11,9 @@ export default function CategoryChips() {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-extrabold text-slate-900 tracking-tight">¿Qué se te antoja hoy?</h2>
-        <div className="flex items-center gap-1 bg-orange-50 border border-orange-200 text-orange-700 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide animate-pulse">
+        <div className="flex items-center gap-1 bg-yellow-50 border border-yellow-200 text-yellow-800 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide animate-pulse">
           <span>Desliza</span>
-          <ChevronRight className="w-3 h-3 text-orange-600" />
+          <ChevronRight className="w-3 h-3 text-yellow-600" />
         </div>
       </div>
 
@@ -31,7 +31,7 @@ export default function CategoryChips() {
           <div
             className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl transition shadow-xs ${
               selectedCategorySlug === null
-                ? 'bg-gradient-to-tr from-orange-500 to-amber-500 text-white shadow-orange-500/25 ring-2 ring-orange-500 ring-offset-2'
+                ? 'bg-gradient-to-tr from-yellow-300 via-yellow-400 to-yellow-500 text-slate-950 shadow-yellow-500/30 ring-2 ring-yellow-400 ring-offset-2'
                 : 'bg-white border border-slate-200/90 group-hover:border-slate-300'
             }`}
           >
@@ -39,7 +39,7 @@ export default function CategoryChips() {
           </div>
           <span
             className={`text-xs text-center font-medium max-w-[70px] truncate ${
-              selectedCategorySlug === null ? 'text-orange-600 font-bold' : 'text-slate-700'
+              selectedCategorySlug === null ? 'text-yellow-700 font-black' : 'text-slate-700'
             }`}
           >
             Todos
@@ -65,7 +65,7 @@ export default function CategoryChips() {
               <div
                 className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl transition shadow-xs ${
                   isSelected
-                    ? 'bg-gradient-to-tr from-orange-500 to-amber-500 text-white shadow-orange-500/25 ring-2 ring-orange-500 ring-offset-2'
+                    ? 'bg-gradient-to-tr from-yellow-300 via-yellow-400 to-yellow-500 text-slate-950 shadow-yellow-500/30 ring-2 ring-yellow-400 ring-offset-2'
                     : 'bg-white border border-slate-200/90 group-hover:border-slate-300'
                 }`}
               >
@@ -73,7 +73,7 @@ export default function CategoryChips() {
               </div>
               <span
                 className={`text-xs text-center font-medium max-w-[75px] truncate ${
-                  isSelected ? 'text-orange-600 font-bold' : 'text-slate-700'
+                  isSelected ? 'text-yellow-700 font-black' : 'text-slate-700'
                 }`}
               >
                 {cat.name}
@@ -86,7 +86,7 @@ export default function CategoryChips() {
         {/* Flecha indicadora parpadeante para deslizar en móviles */}
         <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none pr-1 sm:hidden">
           <div className="w-6 h-6 rounded-full bg-slate-900/80 text-white flex items-center justify-center shadow-md animate-pulse backdrop-blur-xs">
-            <ChevronRight className="w-3.5 h-3.5 text-orange-400 stroke-[3]" />
+            <ChevronRight className="w-3.5 h-3.5 text-yellow-400 stroke-[3]" />
           </div>
         </div>
       </div>

@@ -2,8 +2,8 @@
 
 @layer base {
   :root {
-    --brand-primary: #ff4726;
-    --brand-primary-hover: #e03515;
+    --brand-primary: #eab308;
+    --brand-primary-hover: #ca8a04;
     --brand-dark: #0f172a;
     --brand-bg: #f8fafc;
   }

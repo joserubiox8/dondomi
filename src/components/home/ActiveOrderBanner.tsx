@@ -145,7 +145,7 @@ export default function ActiveOrderBanner() {
           <span className="text-[11px] font-black uppercase tracking-wider text-slate-500">
             Tus pedidos en curso ({validOrders.length})
           </span>
-          <span className="text-[10px] text-orange-600 font-bold">En vivo</span>
+          <span className="text-[10px] text-yellow-600 font-bold">En vivo</span>
         </div>
       )}
 
@@ -196,12 +196,12 @@ export default function ActiveOrderBanner() {
           <Link
             key={order.id}
             href={`/order/${order.orderNumber}`}
-            className={`block rounded-3xl p-4 text-white shadow-lg transition transform hover:-translate-y-0.5 active:scale-[0.99] border ${
+            className={`block rounded-3xl p-4 shadow-lg transition transform hover:-translate-y-0.5 active:scale-[0.99] border ${
               isOnTheWay
-                ? 'bg-gradient-to-r from-orange-600 via-red-600 to-amber-600 border-orange-400 shadow-orange-500/25 ring-2 ring-orange-500/20'
+                ? 'bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 text-slate-950 border-yellow-300 shadow-yellow-500/25 ring-2 ring-yellow-400/20'
                 : isDelivered
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-700 border-emerald-400 shadow-emerald-600/20'
-                : 'bg-slate-900 border-slate-700 shadow-slate-900/30'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white border-emerald-400 shadow-emerald-600/20'
+                : 'bg-slate-900 text-white border-slate-700 shadow-slate-900/30'
             }`}
           >
             <div className="flex items-center justify-between gap-3">
@@ -209,10 +209,10 @@ export default function ActiveOrderBanner() {
                 <div
                   className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md ${
                     isOnTheWay
-                      ? 'bg-white text-orange-600'
+                      ? 'bg-slate-950 text-yellow-400'
                       : isDelivered
                       ? 'bg-white text-emerald-600'
-                      : 'bg-orange-600 text-white'
+                      : 'bg-yellow-400 text-slate-950 font-black'
                   }`}
                 >
                   {isOnTheWay ? (
@@ -228,25 +228,49 @@ export default function ActiveOrderBanner() {
 
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] font-black uppercase tracking-wider bg-black/25 backdrop-blur-xs px-2 py-0.5 rounded-full">
+                    <span
+                      className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                        isOnTheWay
+                          ? 'bg-slate-950/15 text-slate-950'
+                          : 'bg-black/25 text-white backdrop-blur-xs'
+                      }`}
+                    >
                       Pedido #{order.orderNumber}
                     </span>
-                    <span className="text-xs text-orange-200 truncate font-semibold">
+                    <span
+                      className={`text-xs truncate font-semibold ${
+                        isOnTheWay ? 'text-slate-900' : 'text-slate-300'
+                      }`}
+                    >
                       • {order.restaurantName}
                     </span>
                   </div>
-                  <h3 className="font-black text-sm sm:text-base text-white tracking-tight mt-0.5 truncate">
+                  <h3
+                    className={`font-black text-sm sm:text-base tracking-tight mt-0.5 truncate ${
+                      isOnTheWay ? 'text-slate-950' : 'text-white'
+                    }`}
+                  >
                     {getStatusText(order.status)}
                   </h3>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                <span className="text-xs font-black bg-white text-slate-900 px-3.5 py-1.5 rounded-xl shadow-xs inline-flex items-center gap-1">
+                <span
+                  className={`text-xs font-black px-3.5 py-1.5 rounded-xl shadow-xs inline-flex items-center gap-1 ${
+                    isOnTheWay
+                      ? 'bg-slate-950 text-yellow-400'
+                      : 'bg-white text-slate-900'
+                  }`}
+                >
                   <span>{isDelivered ? 'Ver detalles' : 'Rastrear'}</span>
                   <ChevronRight
                     className={`w-3.5 h-3.5 stroke-[3] ${
-                      isDelivered ? 'text-emerald-600' : 'text-orange-600'
+                      isOnTheWay
+                        ? 'text-yellow-400'
+                        : isDelivered
+                        ? 'text-emerald-600'
+                        : 'text-yellow-600'
                     }`}
                   />
                 </span>

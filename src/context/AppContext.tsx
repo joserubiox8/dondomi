@@ -2210,7 +2210,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     pending.notes
                   );
                 }}
-                className="py-2.5 px-3 rounded-2xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-md shadow-orange-600/25 transition cursor-pointer"
+                className="py-2.5 px-3 rounded-2xl bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black shadow-md shadow-yellow-500/25 transition cursor-pointer"
               >
                 Sí, cambiar
               </button>

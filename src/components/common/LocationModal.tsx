@@ -24,8 +24,8 @@ export default function LocationModal() {
         {/* Modal Header */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center">
-              <MapPin className="w-4 h-4 text-orange-600" />
+            <div className="w-8 h-8 rounded-full bg-yellow-100 flex items-center justify-center">
+              <MapPin className="w-4 h-4 text-yellow-600" />
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-base">¿Dónde te encuentras?</h3>
@@ -41,8 +41,8 @@ export default function LocationModal() {
         </div>
 
         {/* Info card */}
-        <div className="p-4 bg-orange-50/70 border-b border-orange-100/60 flex items-start gap-3">
-          <Navigation className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+        <div className="p-4 bg-yellow-50/70 border-b border-yellow-200/60 flex items-start gap-3">
+          <Navigation className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
           <p className="text-xs text-slate-700 leading-relaxed">
             El costo del domicilio y tiempo estimado se calculan automáticamente según el barrio seleccionado en Valledupar.
           </p>
@@ -61,15 +61,15 @@ export default function LocationModal() {
                 }}
                 className={`w-full text-left py-3 px-3 rounded-xl flex items-center justify-between transition ${
                   isSelected
-                    ? 'bg-orange-500 text-white font-semibold shadow-xs'
+                    ? 'bg-yellow-400 text-slate-950 font-bold shadow-xs'
                     : 'hover:bg-slate-50 text-slate-800'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : 'bg-orange-400'}`}></span>
+                  <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-slate-950' : 'bg-yellow-500'}`}></span>
                   <span className="text-sm">{neighborhood}</span>
                 </div>
-                {isSelected && <Check className="w-4 h-4 text-white" />}
+                {isSelected && <Check className="w-4 h-4 text-slate-950 stroke-[3]" />}
               </button>
             );
           })}

@@ -108,8 +108,8 @@ export default function RestaurantList() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center">
-              <Store className="w-3.5 h-3.5 text-orange-600" />
+            <div className="w-6 h-6 rounded-full bg-yellow-100 flex items-center justify-center">
+              <Store className="w-3.5 h-3.5 text-yellow-600" />
             </div>
             <h2 className="text-base font-bold text-slate-900 tracking-tight">
               {activeCategory ? `Restaurantes de ${activeCategory.name}` : 'Restaurantes disponibles'}
@@ -123,7 +123,7 @@ export default function RestaurantList() {
 
         {sortedAndFilteredRestaurants.length === 0 ? (
           <div className="bg-white rounded-3xl p-8 text-center border border-slate-200/80 space-y-3">
-            <div className="w-12 h-12 rounded-full bg-orange-50 text-orange-600 mx-auto flex items-center justify-center">
+            <div className="w-12 h-12 rounded-full bg-yellow-50 text-yellow-600 mx-auto flex items-center justify-center">
               <UtensilsCrossed className="w-6 h-6" />
             </div>
             <div>
