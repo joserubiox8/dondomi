@@ -509,8 +509,8 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
         {/* Header */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-yellow-100 flex items-center justify-center">
-              <ShoppingBag className="w-4 h-4 text-yellow-600" />
+            <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center">
+              <ShoppingBag className="w-4 h-4 text-orange-600" />
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-sm">Tu Pedido</h3>
@@ -531,13 +531,13 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
         {checkoutStage === 'SENDING' ? (
           <div className="p-8 sm:p-12 text-center flex flex-col items-center justify-center space-y-6 flex-1 min-h-[380px] animate-in fade-in">
             <div className="relative w-24 h-24 flex items-center justify-center">
-              <div className="absolute inset-0 rounded-full bg-yellow-400/25 animate-ping" />
-              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-yellow-400 via-amber-400 to-yellow-500 text-slate-950 flex items-center justify-center shadow-xl shadow-yellow-500/30">
+              <div className="absolute inset-0 rounded-full bg-orange-500/20 animate-ping" />
+              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-orange-600 to-red-500 text-white flex items-center justify-center shadow-xl shadow-orange-500/30">
                 <Bike className="w-10 h-10 animate-bounce" />
               </div>
             </div>
             <div className="space-y-2 max-w-xs mx-auto">
-              <span className="text-[11px] font-black uppercase tracking-wider text-yellow-800 bg-yellow-50 px-3 py-1 rounded-full border border-yellow-200">
+              <span className="text-[11px] font-black uppercase tracking-wider text-orange-600 bg-orange-50 px-3 py-1 rounded-full border border-orange-200">
                 Transmitiendo Pedido
               </span>
               <h4 className="text-xl font-black text-slate-900 tracking-tight">
@@ -548,7 +548,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               </p>
             </div>
             <div className="w-48 bg-slate-100 rounded-full h-2 overflow-hidden shadow-inner">
-              <div className="h-full bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 rounded-full animate-pulse w-3/4" />
+              <div className="h-full bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 rounded-full animate-pulse w-3/4" />
             </div>
           </div>
         ) : checkoutStage === 'CONFIRMED' ? (
@@ -574,7 +574,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
               <CheckCircle2 className="w-10 h-10" />
             </div>
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-yellow-800 bg-yellow-50 px-2.5 py-0.5 rounded-full border border-yellow-200">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600 bg-orange-50 px-2.5 py-0.5 rounded-full">
                 Pedido #{placedOrder.orderNumber}
               </span>
               <h4 className="text-xl font-black text-slate-900 mt-1">¡Pedido Registrado con Éxito!</h4>
@@ -608,7 +608,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
             <div className="bg-slate-50 rounded-2xl p-4 text-left border border-slate-200 space-y-2 text-xs text-slate-700">
               <div className="flex justify-between font-bold text-slate-900">
                 <span>Total a pagar:</span>
-                <span className="text-base text-slate-950 font-black">{formatCOP(placedOrder.total)}</span>
+                <span className="text-base text-orange-600 font-black">{formatCOP(placedOrder.total)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Forma de pago:</span>
@@ -625,7 +625,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
             <Link
               href={`/order/${placedOrder.orderNumber}`}
               onClick={handleCloseDrawer}
-              className="w-full bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black py-3.5 px-4 rounded-2xl shadow-lg shadow-yellow-500/25 flex items-center justify-center gap-2 text-sm transition"
+              className="w-full bg-orange-600 hover:bg-orange-500 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-orange-600/25 flex items-center justify-center gap-2 text-sm transition"
             >
               <span>🛵 Rastrear mi Pedido en Tiempo Real</span>
             </Link>
@@ -711,7 +711,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       {item.notes && (
                         <p className="text-[10px] text-amber-600 italic">Nota: {item.notes}</p>
                       )}
-                      <span className="text-xs font-black text-slate-900 mt-0.5 block">
+                      <span className="text-xs font-black text-orange-600 mt-0.5 block">
                         {formatCOP(item.itemTotal)}
                       </span>
                     </div>
@@ -754,7 +754,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       placeholder="Ej: Carlos Gutiérrez"
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400/30 focus:border-yellow-400"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                     />
                   </div>
 
@@ -774,7 +774,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       placeholder="Ej: 3001234567"
                       value={customerPhone}
                       onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400/30 focus:border-yellow-400 font-mono text-sm"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 font-mono text-sm"
                     />
                   </div>
 
@@ -788,7 +788,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       placeholder="Ej: Novalito, La Nevada, Garupal, Los Cortijos..."
                       value={deliveryNeighborhood}
                       onChange={(e) => setDeliveryNeighborhood(e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400/30 focus:border-yellow-400"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                     />
                   </div>
 
@@ -802,7 +802,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       placeholder="Ej: Calle 8 # 6-30, Mz 4 Casa 12"
                       value={deliveryStreet}
                       onChange={(e) => setDeliveryStreet(e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400/30 focus:border-yellow-400"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                     />
                   </div>
 
@@ -815,7 +815,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       placeholder="Ej: Casa blanca de rejas negras frente al parque"
                       value={deliveryReference}
                       onChange={(e) => setDeliveryReference(e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400/30 focus:border-yellow-400"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                     />
                   </div>
 
@@ -828,7 +828,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       placeholder="Ej: Traer cambio de $50.000, timbrar en el segundo piso"
                       value={orderNotes}
                       onChange={(e) => setOrderNotes(e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400/30 focus:border-yellow-400"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                     />
                   </div>
                 </div>
@@ -847,7 +847,7 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       onClick={() => setPaymentMethod(method.id)}
                       className={`p-2.5 rounded-xl text-xs font-bold border transition text-center cursor-pointer ${
                         paymentMethod === method.id
-                          ? 'border-yellow-400 bg-yellow-50 text-yellow-900 shadow-2xs'
+                          ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-2xs'
                           : 'border-slate-200 text-slate-600 bg-white hover:bg-slate-50'
                       }`}
                     >
@@ -889,14 +889,14 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="flex items-center gap-1">
-                    <Bike className="w-3.5 h-3.5 text-yellow-600" />
+                    <Bike className="w-3.5 h-3.5 text-orange-600" />
                     Domicilio fijo:
                   </span>
                   <span className="font-semibold text-slate-800">{formatCOP(deliveryFee)}</span>
                 </div>
                 <div className="pt-2 border-t border-slate-200 flex justify-between text-sm font-black text-slate-900">
                   <span>Total a pagar:</span>
-                  <span className="text-slate-950 text-base font-black">{formatCOP(grandTotal)}</span>
+                  <span className="text-orange-600 text-base">{formatCOP(grandTotal)}</span>
                 </div>
               </div>
             </div>
@@ -933,15 +933,15 @@ _¡Muchas gracias! Quedo atento a la confirmación de la cocina._`;
                       currentRestaurant.accountStatus === 'SUSPENDED' ||
                       currentRestaurant.accountStatus === 'ARCHIVED'))
                 }
-                className={`w-full font-black py-3.5 px-4 rounded-2xl shadow-lg flex items-center justify-between transition ${
+                className={`w-full text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg flex items-center justify-between transition ${
                   isSubmitting ||
                   isBelowMinOrder ||
                   (currentRestaurant &&
                     (currentRestaurant.isOpen === false ||
                       currentRestaurant.accountStatus === 'SUSPENDED' ||
                       currentRestaurant.accountStatus === 'ARCHIVED'))
-                    ? 'bg-slate-400 text-white cursor-not-allowed opacity-80'
-                    : 'bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 hover:from-yellow-500 hover:to-amber-500 text-slate-950 shadow-yellow-500/25 active:scale-[0.98] cursor-pointer'
+                    ? 'bg-slate-400 cursor-not-allowed opacity-80'
+                    : 'bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 shadow-orange-500/25 active:scale-[0.98] cursor-pointer'
                 }`}
               >
                 {isSubmitting ? (

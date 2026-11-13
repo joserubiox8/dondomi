@@ -1048,12 +1048,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
     }
 
-    // 1. Verificar estado vigente del restaurante directamente en Supabase
-    const { data: rawDbRest } = await supabase
-      .from('restaurants')
-      .select('*')
-      .eq('id', newOrder.restaurantId)
-      .maybeSingle();
+    // 1. Verificar estado vigente del restaurante directamente en Supabase (con tolerancia a fallos de red)
+    let rawDbRest: any = null;
+    try {
+      const { data } = await supabase
+        .from('restaurants')
+        .select('*')
+        .eq('id', newOrder.restaurantId)
+        .maybeSingle();
+      rawDbRest = data;
+    } catch {
+      rawDbRest = null;
+    }
 
     const dbRest = rawDbRest || (localRest ? {
       id: localRest.id,
@@ -1085,10 +1091,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw new Error('El pedido no contiene productos válidos.');
     }
 
-    const { data: dbProducts } = await supabase
-      .from('products')
-      .select('*')
-      .in('id', itemProductIds);
+    let dbProducts: any[] | null = null;
+    try {
+      const { data } = await supabase
+        .from('products')
+        .select('*')
+        .in('id', itemProductIds);
+      dbProducts = data;
+    } catch {
+      dbProducts = null;
+    }
 
     const localMenuProducts = productsByRestaurant[newOrder.restaurantId] || INITIAL_PRODUCTS[newOrder.restaurantId] || [];
 
@@ -1231,29 +1243,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       transfer_platform: newOrder.transferPlatform || null,
     };
 
-    let insertError = null;
-    const { error } = await supabase.from('orders').insert([dbRow]);
-    if (error) {
-      if (error.code === '42703' || String(error.message).includes('column')) {
-        const fallbackRow = { ...dbRow };
-        delete fallbackRow.order_channel;
-        delete fallbackRow.table_number;
-        delete fallbackRow.is_split_payment;
-        delete fallbackRow.cash_amount;
-        delete fallbackRow.transfer_amount;
-        delete fallbackRow.transfer_platform;
-        const retry = await supabase.from('orders').insert([fallbackRow]);
-        insertError = retry.error;
-      } else {
-        insertError = error;
-      }
-    }
-
-    if (insertError) {
-      console.error('Error guardando pedido en Supabase:', insertError);
-      throw new Error('Hubo un problema de conexión al registrar la orden en Supabase. Por favor intenta de nuevo.');
-    }
-
     const confirmedOrder: Order = {
       ...newOrder,
       restaurantName: dbRest.name || newOrder.restaurantName,
@@ -1265,7 +1254,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       customerNotes: formattedNotes || undefined,
     };
 
-    // Actualizar estado local sólo después de confirmar guardado en Supabase
+    // Si el restaurante no existía aún en Supabase (ej. catálogo ampliado rest-7..rest-30), sincronizarlo antes de insertar la orden
+    if (!rawDbRest && localRest) {
+      await dataService.saveRestaurant(localRest);
+    }
+
+    const createRes = await dataService.createOrder(dbRow, confirmedOrder, localRest);
+
+    if (!createRes.persistedInSupabase && !createRes.usedLocalFallback) {
+      console.error('Error guardando pedido en Supabase:', createRes.error);
+      const errCode = createRes.error?.code ? ` (${createRes.error.code})` : '';
+      const errMsg = createRes.error?.message || 'Error desconocido al registrar el pedido.';
+      throw new Error(`No se pudo registrar el pedido en Supabase${errCode}: ${errMsg}`);
+    }
+
+    if (createRes.usedLocalFallback && createRes.error) {
+      console.warn('Pedido guardado en respaldo local por indisponibilidad de Supabase:', createRes.error);
+    }
+
+    // Actualizar estado local tras confirmar guardado en Supabase o respaldo local
     setOrders((prev) => [confirmedOrder, ...prev.filter((o) => o.id !== confirmedOrder.id)]);
     return true;
   };
@@ -1315,6 +1322,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           : o
       )
     );
+
+    dataService.updateLocalOrder(orderId, {
+      status: newStatus,
+      paymentStatus: nextPaymentStatus,
+      cancellationReason: reason || current.cancellationReason,
+      cancelledBy: cancelledBy || current.cancelledBy,
+      customerNotes: updatedNotes,
+    });
 
     try {
       const payload: any = { status: newStatus, payment_status: nextPaymentStatus };
@@ -2210,7 +2225,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     pending.notes
                   );
                 }}
-                className="py-2.5 px-3 rounded-2xl bg-yellow-400 hover:bg-yellow-500 text-slate-950 text-xs font-black shadow-md shadow-yellow-500/25 transition cursor-pointer"
+                className="py-2.5 px-3 rounded-2xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-md shadow-orange-600/25 transition cursor-pointer"
               >
                 Sí, cambiar
               </button>

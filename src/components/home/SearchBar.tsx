@@ -24,7 +24,7 @@ export default function SearchBar() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Busca pollo, hamburguesas, pizza o restaurante..."
-          className="w-full bg-white border border-slate-200/90 rounded-2xl pl-11 pr-10 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-xs focus:outline-none focus:ring-2 focus:ring-yellow-400/30 focus:border-yellow-400 transition"
+          className="w-full bg-white border border-slate-200/90 rounded-2xl pl-11 pr-10 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-xs focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition"
         />
         {searchQuery && (
           <button
@@ -43,10 +43,10 @@ export default function SearchBar() {
           <button
             type="button"
             onClick={() => setSelectedCategorySlug(null)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-yellow-100 text-yellow-900 border border-yellow-300 font-bold whitespace-nowrap cursor-pointer hover:bg-yellow-200 transition"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200 font-bold whitespace-nowrap cursor-pointer hover:bg-orange-200 transition"
           >
             <span>Filtro de categoría activo</span>
-            <X className="w-3.5 h-3.5 text-yellow-700" />
+            <X className="w-3.5 h-3.5 text-orange-600" />
           </button>
         </div>
       )}

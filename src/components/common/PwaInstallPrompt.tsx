@@ -21,7 +21,6 @@ export default function PwaInstallPrompt() {
         badge: 'Panel Aliados',
         manifestHref: '/manifest-merchant.json',
         iconBg: 'from-slate-800 to-amber-600',
-        iconText: 'text-white',
         btnBg: 'bg-amber-500 hover:bg-amber-400 text-slate-950',
       }
     : pathname.startsWith('/driver')
@@ -31,7 +30,6 @@ export default function PwaInstallPrompt() {
         badge: 'App Repartidor',
         manifestHref: '/manifest-driver.json',
         iconBg: 'from-emerald-600 to-green-500',
-        iconText: 'text-white',
         btnBg: 'bg-emerald-600 hover:bg-emerald-500 text-white',
       }
     : pathname.startsWith('/admin')
@@ -41,7 +39,6 @@ export default function PwaInstallPrompt() {
         badge: 'Master Admin',
         manifestHref: '/manifest-admin.json',
         iconBg: 'from-indigo-600 to-violet-600',
-        iconText: 'text-white',
         btnBg: 'bg-indigo-600 hover:bg-indigo-500 text-white',
       }
     : {
@@ -49,9 +46,8 @@ export default function PwaInstallPrompt() {
         subtitle: 'Pide más rápido desde tu inicio',
         badge: 'App Oficial Valledupar',
         manifestHref: '/manifest-client.json',
-        iconBg: 'from-yellow-400 to-amber-500',
-        iconText: 'text-slate-950',
-        btnBg: 'bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black',
+        iconBg: 'from-orange-600 to-amber-500',
+        btnBg: 'bg-orange-600 hover:bg-orange-500 text-white',
       };
 
   // Mantener sincronizado el <link rel="manifest"> en navegación cliente
@@ -168,11 +164,11 @@ export default function PwaInstallPrompt() {
         <div className="fixed bottom-4 left-4 right-4 sm:right-auto sm:max-w-sm z-40 print:hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="bg-slate-900 text-white border border-slate-700 rounded-2xl p-3 shadow-2xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${appMeta.iconBg} ${appMeta.iconText} flex items-center justify-center font-black text-sm shadow-md flex-shrink-0`}>
+              <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${appMeta.iconBg} flex items-center justify-center text-white font-black text-sm shadow-md flex-shrink-0`}>
                 DD
               </div>
               <div className="min-w-0">
-                <span className="text-[10px] font-extrabold text-yellow-400 uppercase tracking-wider block leading-none">
+                <span className="text-[10px] font-extrabold text-orange-400 uppercase tracking-wider block leading-none">
                   {appMeta.badge}
                 </span>
                 <span className="text-xs sm:text-sm font-black text-white truncate block mt-0.5">
@@ -212,7 +208,7 @@ export default function PwaInstallPrompt() {
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full text-slate-900 space-y-4 shadow-2xl animate-in zoom-in-95">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-yellow-100 text-yellow-700 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
                   <Smartphone className="w-4 h-4" />
                 </div>
                 <h3 className="font-black text-sm text-slate-900">
@@ -235,7 +231,7 @@ export default function PwaInstallPrompt() {
                 </p>
                 <ol className="text-xs space-y-3 text-slate-700">
                   <li className="flex items-start gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-yellow-400 text-slate-950 font-black flex items-center justify-center text-[11px] flex-shrink-0">
+                    <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-bold flex items-center justify-center text-[11px] flex-shrink-0">
                       1
                     </span>
                     <span>
@@ -244,7 +240,7 @@ export default function PwaInstallPrompt() {
                     </span>
                   </li>
                   <li className="flex items-start gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-yellow-400 text-slate-950 font-black flex items-center justify-center text-[11px] flex-shrink-0">
+                    <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-bold flex items-center justify-center text-[11px] flex-shrink-0">
                       2
                     </span>
                     <span>
@@ -260,7 +256,7 @@ export default function PwaInstallPrompt() {
                 </p>
                 <ol className="text-xs space-y-3 text-slate-700">
                   <li className="flex items-start gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-yellow-400 text-slate-950 font-black flex items-center justify-center text-[11px] flex-shrink-0">
+                    <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-bold flex items-center justify-center text-[11px] flex-shrink-0">
                       1
                     </span>
                     <span>
@@ -269,7 +265,7 @@ export default function PwaInstallPrompt() {
                     </span>
                   </li>
                   <li className="flex items-start gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-yellow-400 text-slate-950 font-black flex items-center justify-center text-[11px] flex-shrink-0">
+                    <span className="w-5 h-5 rounded-full bg-orange-600 text-white font-bold flex items-center justify-center text-[11px] flex-shrink-0">
                       2
                     </span>
                     <span>

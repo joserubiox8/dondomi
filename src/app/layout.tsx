@@ -33,7 +33,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#EAB308',
+  themeColor: '#EA580C',
 };
 
 export default function RootLayout({
@@ -43,7 +43,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es" className={`h-full ${fontSans.variable}`}>
-      <body className={`${fontSans.className} h-full antialiased text-slate-800 bg-slate-50 selection:bg-yellow-400 selection:text-slate-950 pb-8 font-sans`}>
+      <body className={`${fontSans.className} h-full antialiased text-slate-800 bg-slate-50 selection:bg-orange-500 selection:text-white pb-8 font-sans`}>
         <AppProvider>
           {children}
           <CartFloatBar />

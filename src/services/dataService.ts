@@ -16,7 +16,7 @@
  * la escritura.
  */
 
-import { supabase } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
   FoodCategory,
   Driver,
@@ -57,6 +57,7 @@ const STORAGE_KEYS = {
   DELETED_DRIVERS: 'dondomi_deleted_drivers_v1',
   DRIVER_HASHES: 'dondomi_driver_hashes_v1',
   PRODUCTS_LOCAL: 'dondomi_products_local_v1',
+  ORDERS_LOCAL: 'dondomi_orders_local_v1',
   GLOBAL_DELIVERY_FEE: 'dondomi_global_delivery_fee',
   GLOBAL_ANNOUNCEMENT: 'dondomi_global_announcement',
   PLATFORM_CONFIG: 'dondomi_platform_config',
@@ -585,13 +586,21 @@ export const dataService = {
   // 6. PEDIDOS Y CICLO DE VIDA
   // ==========================================================================
   async getOrders(): Promise<{ data: Order[]; error?: any }> {
+    const localOrders = getLocalOrders();
+
+    if (!isSupabaseConfigured) {
+      return { data: localOrders };
+    }
+
     try {
       const { data, error } = await supabase
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) return { data: [], error };
+      if (error) {
+        return { data: localOrders, error };
+      }
 
       const mapped: Order[] = (data || []).map((row: any) => {
         const parsed = parseOrderNotes(row.customer_notes);
@@ -632,12 +641,150 @@ export const dataService = {
         };
       });
 
-      return { data: mapped };
+      // Combinar órdenes remotas con respaldos locales que aún no se hayan sincronizado
+      const orderMap = new Map<string, Order>();
+      localOrders.forEach((o) => orderMap.set(o.id, o));
+      mapped.forEach((o) => orderMap.set(o.id, o));
+
+      const merged = Array.from(orderMap.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+
+      return { data: merged };
     } catch (err) {
-      return { data: [], error: err };
+      return { data: localOrders, error: err };
     }
   },
+
+  async createOrder(
+    dbRow: Record<string, any>,
+    confirmedOrder: Order,
+    localRestaurant?: Restaurant
+  ): Promise<{ persistedInSupabase: boolean; usedLocalFallback: boolean; error?: any }> {
+    if (!isSupabaseConfigured) {
+      saveLocalOrder(confirmedOrder);
+      return { persistedInSupabase: false, usedLocalFallback: true };
+    }
+
+    const payload: Record<string, any> = { ...dbRow };
+    let restaurantSynced = false;
+    let driverCleared = false;
+    let paymentNormalized = false;
+    const maxAttempts = 15;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const { error } = await supabase.from('orders').insert([payload]);
+        if (!error) {
+          return { persistedInSupabase: true, usedLocalFallback: false };
+        }
+
+        const code = String(error.code || '');
+        const msg = String(error.message || '');
+        const details = String(error.details || '');
+        const combined = `${msg} ${details}`.toLowerCase();
+
+        // 1. Columna opcional ausente en esquema remoto (PGRST204 / 42703)
+        if (code === 'PGRST204' || code === '42703' || msg.includes('schema cache') || msg.includes('column')) {
+          const missingCol = extractMissingColumnName(error);
+          if (missingCol && missingCol in payload && missingCol !== 'id') {
+            delete payload[missingCol];
+            continue;
+          }
+        }
+
+        // 2. Error de llave foránea (23503): restaurante o domiciliario no existe en Supabase
+        if (code === '23503') {
+          if (combined.includes('restaurant') && localRestaurant && !restaurantSynced) {
+            restaurantSynced = true;
+            await upsertWithSchemaTolerance('restaurants', restaurantToDb(localRestaurant));
+            continue;
+          }
+          if (combined.includes('driver') && payload.driver_id && !driverCleared) {
+            driverCleared = true;
+            payload.driver_id = null;
+            continue;
+          }
+        }
+
+        // 3. Error de restricción CHECK (23514) por método de pago nuevo (ej. BRE_B / MIXTO) en esquema antiguo
+        if (code === '23514' && combined.includes('payment_method') && !paymentNormalized) {
+          paymentNormalized = true;
+          const originalMethod = String(payload.payment_method || '');
+          payload.customer_notes = payload.customer_notes
+            ? `[Método: ${originalMethod}] ${payload.customer_notes}`
+            : `[Método: ${originalMethod}]`;
+          payload.payment_method = originalMethod === 'BRE_B' ? 'NEQUI' : 'EFECTIVO';
+          continue;
+        }
+
+        // 4. Tabla 'orders' no existe (42P01) o error de red/conectividad -> respaldo local
+        if (
+          code === '42P01' ||
+          combined.includes('failed to fetch') ||
+          combined.includes('networkerror') ||
+          combined.includes('load failed') ||
+          combined.includes('fetch')
+        ) {
+          saveLocalOrder(confirmedOrder);
+          return { persistedInSupabase: false, usedLocalFallback: true, error };
+        }
+
+        return { persistedInSupabase: false, usedLocalFallback: false, error };
+      } catch (err: any) {
+        // Excepción de red (offline / DNS / timeout) -> respaldo local transparente
+        saveLocalOrder(confirmedOrder);
+        return { persistedInSupabase: false, usedLocalFallback: true, error: err };
+      }
+    }
+
+    return {
+      persistedInSupabase: false,
+      usedLocalFallback: false,
+      error: new Error('Se agotaron los reintentos de compatibilidad al insertar el pedido en Supabase.'),
+    };
+  },
+
+  updateLocalOrder(orderId: string, updates: Partial<Order>) {
+    if (typeof window === 'undefined') return;
+    try {
+      const existing = getLocalOrders();
+      if (existing.length === 0) return;
+      let changed = false;
+      const next = existing.map((o) => {
+        if (o.id === orderId) {
+          changed = true;
+          return { ...o, ...updates };
+        }
+        return o;
+      });
+      if (changed) {
+        localStorage.setItem(STORAGE_KEYS.ORDERS_LOCAL, JSON.stringify(next));
+      }
+    } catch {}
+  },
 };
+
+function getLocalOrders(): Order[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ORDERS_LOCAL);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalOrder(order: Order) {
+  if (typeof window === 'undefined') return;
+  try {
+    const existing = getLocalOrders().filter((o) => o.id !== order.id);
+    const updated = [order, ...existing].slice(0, 150);
+    localStorage.setItem(STORAGE_KEYS.ORDERS_LOCAL, JSON.stringify(updated));
+  } catch {}
+}
 
 /**
  * Calcula en tiempo real el nivel de fidelización VIP de un cliente según
